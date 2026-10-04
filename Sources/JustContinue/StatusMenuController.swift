@@ -507,9 +507,27 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// (The status item itself may be hidden behind the notch on a crowded menu bar.)
     func openForScreenshot(closeAfter seconds: TimeInterval) {
         guard let screen = NSScreen.main else { return }
+        // Capture the composited menu over a neutral backdrop. Capturing the translucent
+        // menu window alone can turn its material into a flat grey surface.
+        let backdrop = NSWindow(contentRect: screen.frame, styleMask: .borderless,
+                                backing: .buffered, defer: false)
+        backdrop.backgroundColor = .white
+        backdrop.isReleasedWhenClosed = false
+        backdrop.orderFrontRegardless()
+        defer { backdrop.close() }
+        NSApp.activate()
+        menu.appearance = NSAppearance(named: .aqua)
         let point = NSPoint(x: screen.frame.minX + 100, y: screen.frame.maxY - 60)
-        print("MENU_ORIGIN 100 60")
-        fflush(stdout)
+        let captureTimer = Timer(timeInterval: 1, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let frame = self?.menu.items.compactMap({ $0.view?.window?.frame }).first,
+                      let desktopTop = NSScreen.screens.first?.frame.maxY else { return }
+                let padding: CGFloat = 16
+                print("MENU_RECT \(Int(frame.minX - padding)),\(Int(desktopTop - frame.maxY - padding)),\(Int(frame.width + padding * 2)),\(Int(frame.height + padding * 2))")
+                fflush(stdout)
+            }
+        }
+        RunLoop.main.add(captureTimer, forMode: .common)
         let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.menu.cancelTracking() }
         }
