@@ -1,0 +1,17 @@
+# Build output
+.build/
+build/
+DerivedData/
+*.app
+*.dSYM/
+
+# macOS / editors
+.DS_Store
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+
+# Local terminal probes and captured machine data
+probe/out/
+probe/probe
+probe/axprobe
