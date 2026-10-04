@@ -4,23 +4,19 @@
 
 <h1 align="center">Just Continue</h1>
 
-Just Continue resumes **Codex CLI sessions after usage limits reset**. It runs in your macOS
-menu bar and sends **`continue` followed by Return** to the terminal sessions you enable.
+When a **Codex CLI session hits its usage limit**, Just Continue waits for the limit to reset,
+then **types `continue` and presses Return in that session** so Codex can carry on.
+
+The app runs in your macOS menu bar. Enable the sessions you want it to continue and leave
+their terminals open. After the reset and your configured delay, it sends the message when
+your Mac is idle or locked. If you're active, it shows a notification with **Continue Now** instead.
 
 Supports **Terminal.app, iTerm2, Ghostty 1.3+, and tmux**. Other terminals work through tmux.
+It also keeps your Mac awake and shows plan usage. Claude Code support is described below.
 
 [GitHub](https://github.com/jackschwarz2017/just-continue) ·
 [Report an issue](https://github.com/jackschwarz2017/just-continue/issues) ·
 [Sponsor](https://github.com/sponsors/jackschwarz2017)
-
-Keep those sessions open. The app reads their logs for the reset time, waits for the configured
-delay, then sends the message when your Mac is idle or locked. If you're active, it shows a
-notification instead. Before sending, it checks the session and terminal; afterward, it checks
-for progress and retries if needed.
-
-It also keeps your Mac awake while sessions are enabled and shows plan usage in the menu.
-Session monitoring runs locally. Codex usage is fetched through your signed-in Codex CLI.
-Claude Code is supported too, as described below.
 
 <p align="center">
   <img src="docs/images/menu.png" width="359" alt="Sessions grouped by terminal, with plan usage and a scheduled continuation">
@@ -38,13 +34,12 @@ for both agents.
 
 ## Install
 
-Requires **macOS 14+** and **Xcode 26+** to build. From the repository folder:
+Requires **macOS 14+**. The signed and notarized app supports **Apple Silicon and Intel**.
 
-```sh
-scripts/build-app.sh
-mv "build/Just Continue.app" /Applications/
-open "/Applications/Just Continue.app"
-```
+[Download the DMG from GitHub Releases](https://github.com/jackschwarz2017/just-continue/releases).
+Open it, drag **Just Continue** into **Applications**, and launch the app.
+
+To build from source, see [Development](#development).
 
 Works with **Codex CLI** and **Claude Code CLI**. Agent desktop apps aren't supported.
 
@@ -122,6 +117,8 @@ SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
 ```
 
 ## Development
+
+Building from source requires **Xcode 26+**. From the repository folder:
 
 ```sh
 swift build
