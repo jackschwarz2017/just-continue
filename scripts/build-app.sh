@@ -1,7 +1,8 @@
 #!/bin/zsh
 # Builds build/Just Continue.app from the Swift package.
 #
-#   scripts/build-app.sh                 # ad-hoc signed
+#   scripts/build-app.sh                 # universal (Apple Silicon + Intel), ad-hoc signed
+#   ARCHS=x86_64 scripts/build-app.sh    # Intel only
 #   SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
 #   DEBUG_MENU=1 scripts/build-app.sh   # include the hidden Debug menu (hold ⌥ when opening the menu)
 #
@@ -14,16 +15,31 @@ BUNDLE_ID=${BUNDLE_ID:-dev.justcontinue.JustContinue}
 VERSION=${VERSION:-0.1.0}
 BUILD=${BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}
 SIGN_IDENTITY=${SIGN_IDENTITY:--}
+ARCHS=${ARCHS:-"arm64 x86_64"}
 
 FLAGS=()
 [[ -n "${DEBUG_MENU:-}" ]] && FLAGS=(-Xswiftc -DDEBUG_MENU)
-swift build -c release --product JustContinue "${FLAGS[@]}"
-BIN="$(swift build -c release --show-bin-path "${FLAGS[@]}")/JustContinue"
+BINS=()
+for BUILD_ARCH in ${=ARCHS}; do
+    case "$BUILD_ARCH" in
+        arm64|x86_64) ;;
+        *) echo "Unsupported architecture: $BUILD_ARCH" >&2; exit 1 ;;
+    esac
+    BUILD_FLAGS=(--scratch-path ".build/app-$BUILD_ARCH" --triple "$BUILD_ARCH-apple-macosx14.0")
+    swift build -c release --product JustContinue "${BUILD_FLAGS[@]}" "${FLAGS[@]}"
+    BINS+=("$(swift build -c release --show-bin-path "${BUILD_FLAGS[@]}" "${FLAGS[@]}")/JustContinue")
+done
+[[ ${#BINS[@]} -gt 0 ]] || { echo "ARCHS must include arm64 or x86_64" >&2; exit 1; }
 
 APP="build/Just Continue.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/JustContinue"
+if [[ ${#BINS[@]} -eq 1 ]]; then
+    cp "${BINS[1]}" "$APP/Contents/MacOS/JustContinue"
+else
+    xcrun lipo -create "${BINS[@]}" -output "$APP/Contents/MacOS/JustContinue"
+fi
+cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 sed -e "s/\$(BUNDLE_ID)/$BUNDLE_ID/" -e "s/\$(VERSION)/$VERSION/" -e "s/\$(BUILD)/$BUILD/" \
     Resources/Info.plist > "$APP/Contents/Info.plist"
 
@@ -35,10 +51,13 @@ xcrun actool --compile "$ICON_OUT" --platform macosx --minimum-deployment-target
 cp "$ICON_OUT/Assets.car" "$ICON_OUT/AppIcon.icns" "$APP/Contents/Resources/"
 rm -rf "$ICON_OUT"
 
-codesign --force --options runtime --timestamp=none \
+TIMESTAMP_FLAG=--timestamp
+[[ "$SIGN_IDENTITY" == "-" ]] && TIMESTAMP_FLAG=--timestamp=none
+codesign --force --options runtime "$TIMESTAMP_FLAG" \
     --entitlements Resources/JustContinue.entitlements \
     --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --strict "$APP"
+xcrun lipo -archs "$APP/Contents/MacOS/JustContinue"
 
 # macOS caches app icons per path; refresh it so a rebuilt app doesn't keep showing an old icon.
 touch "$APP"

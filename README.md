@@ -100,7 +100,7 @@ SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
 ```sh
 swift build
 swift test
-scripts/build-app.sh                       # build/Just Continue.app
+scripts/build-app.sh                       # universal app in build/
 ```
 
 `Sources/JustContinueCore` contains discovery, log parsing, terminal adapters, and the resume
@@ -114,6 +114,8 @@ Debug tools:
 .build/debug/JustContinue --render /tmp/ui --demo
 .build/debug/JustContinue --list-sessions
 ```
+
+For Developer ID signing, notarization, and Intel builds, see [the release guide](docs/RELEASING.md).
 
 ## License
 
