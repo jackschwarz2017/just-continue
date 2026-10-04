@@ -1,6 +1,6 @@
 import Foundation
 
-/// Account-wide plan usage for one agent.
+/// A snapshot of account-wide plan usage for one agent, with its source and collection time.
 public struct AgentUsage: Sendable, Equatable {
     public struct Window: Sendable, Equatable {
         public enum Kind: Sendable { case fiveHour, weekly }
@@ -14,19 +14,22 @@ public struct AgentUsage: Sendable, Equatable {
             self.resetsAt = resetsAt
         }
 
-        /// After the reset time the logged percentage is stale; the window has started over.
-        public func percent(at now: Date) -> Double {
-            if let resetsAt, resetsAt <= now { return 0 }
+        /// A reset invalidates the snapshot; it cannot tell us what another device has used since.
+        public func percent(at now: Date) -> Double? {
+            if let resetsAt, resetsAt <= now { return nil }
             return usedPercent
         }
     }
 
+    public enum Source: Sendable { case localSnapshot, liveAccount }
+    public var source: Source
     public var fiveHour: Window?
     public var weekly: Window?
     /// When the numbers were recorded.
     public var updatedAt: Date?
 
-    public init(fiveHour: Window?, weekly: Window?, updatedAt: Date?) {
+    public init(fiveHour: Window? = nil, weekly: Window? = nil, updatedAt: Date?, source: Source = .localSnapshot) {
+        self.source = source
         self.fiveHour = fiveHour
         self.weekly = weekly
         self.updatedAt = updatedAt
@@ -49,7 +52,8 @@ public enum UsageReader {
         guard let data = try? Data(contentsOf: file), let obj = JSONLines.parse(data),
               let limits = obj["rate_limits"] as? JSONObject else { return nil }
         func window(_ key: String, _ kind: AgentUsage.Window.Kind) -> AgentUsage.Window? {
-            guard let w = limits[key] as? JSONObject, let used = (w["used_percentage"] as? NSNumber)?.doubleValue else { return nil }
+            guard let w = limits[key] as? JSONObject, let used = (w["used_percentage"] as? NSNumber)?.doubleValue,
+                  used.isFinite, (0...100).contains(used) else { return nil }
             return .init(kind: kind, usedPercent: used, resetsAt: epochDate(w["resets_at"]))
         }
         let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
@@ -57,42 +61,7 @@ public enum UsageReader {
         return usage.fiveHour == nil && usage.weekly == nil ? nil : usage
     }
 
-    /// Codex logs `rate_limits.{primary,secondary}` in `token_count` events on every turn.
-    /// The newest one across all rollouts is the account's current usage.
-    public static func codex(home: URL = URL(fileURLWithPath: NSHomeDirectory()), lookbackDays: Int = 14) -> AgentUsage? {
-        let root = home.appendingPathComponent(".codex/sessions")
-        let fm = FileManager.default
-        let calendar = Calendar.current
-        var files: [(URL, Date)] = []
-        for offset in 0...lookbackDays {
-            guard let day = calendar.date(byAdding: .day, value: -offset, to: Date()) else { continue }
-            let c = calendar.dateComponents([.year, .month, .day], from: day)
-            let dir = root.appendingPathComponent(String(format: "%04d/%02d/%02d", c.year!, c.month!, c.day!))
-            for file in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-            where file.pathExtension == "jsonl" {
-                if let m = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate { files.append((file, m)) }
-            }
-        }
-        // Newest files first; the first one with rate limits wins.
-        for (file, _) in files.sorted(by: { $0.1 > $1.1 }).prefix(12) {
-            if let usage = codexUsage(entries: JSONLines.tail(of: file, maxBytes: 256 * 1024)) { return usage }
-        }
-        return nil
-    }
 
-    static func codexUsage(entries: [JSONObject]) -> AgentUsage? {
-        for e in entries.reversed() {
-            guard let limits = e[path: "payload", "rate_limits"] as? JSONObject else { continue }
-            func window(_ key: String, _ kind: AgentUsage.Window.Kind) -> AgentUsage.Window? {
-                guard let w = limits[key] as? JSONObject, let used = (w["used_percent"] as? NSNumber)?.doubleValue else { return nil }
-                return .init(kind: kind, usedPercent: used, resetsAt: epochDate(w["resets_at"]))
-            }
-            let usage = AgentUsage(fiveHour: window("primary", .fiveHour), weekly: window("secondary", .weekly),
-                                   updatedAt: ISO8601.date(e["timestamp"]))
-            if usage.fiveHour != nil || usage.weekly != nil { return usage }  // skip e.g. "premium" entries with null windows
-        }
-        return nil
-    }
 }
 
 /// Connects Claude Code's status line to Just Continue: puts a `tee` in front of the

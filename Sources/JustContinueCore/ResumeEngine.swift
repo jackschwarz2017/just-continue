@@ -60,6 +60,7 @@ public struct PendingResume: Equatable, Sendable {
 
     public var limit: LimitEvent
     public var fireAt: Date
+    var quotaRestoredAt: Date?
     public var attempts = 0
     public var phase = Phase.waiting
     /// Distinguishes a pending send from one cancelled and scheduled again.
@@ -111,6 +112,9 @@ public final class ResumeEngine {
     @ObservationIgnored weak var notifier: Notifying?
     @ObservationIgnored let now: @Sendable () -> Date
     @ObservationIgnored private var scanning = false
+    @ObservationIgnored private var codexAccountUsage: AgentUsage?
+    @ObservationIgnored private var claudeUsage: AgentUsage?
+    @ObservationIgnored private var claudeRestoredAt: Date?
     /// Receives every activity line (for the detailed log).
     @ObservationIgnored public var logSink: ((String) -> Void)?
     /// Extra reason to keep the Mac awake, e.g. a Claude Code session waiting to continue on its own.
@@ -167,6 +171,58 @@ public final class ResumeEngine {
         let discovery = self.discovery
         let sessions = await Task.detached { discovery.scan(previous: previous) }.value
         apply(sessions)
+    }
+
+    public func refreshTerminalLocations() async {
+        discovery.invalidateTerminalCache()
+        await refresh()
+    }
+
+    /// Live account availability can supersede an old Codex limit message (e.g. a reset card).
+    public func updateCodexAccountUsage(_ usage: AgentUsage?) {
+        codexAccountUsage = usage
+        evaluate()
+    }
+
+    /// Claude has local snapshots only: require an observed full-to-available transition.
+    public func updateClaudeUsage(_ usage: AgentUsage?) {
+        if let usage, let updatedAt = usage.updatedAt,
+           let previous = claudeUsage, let previousAt = previous.updatedAt, updatedAt > previousAt,
+           [previous.fiveHour, previous.weekly].compactMap({ $0 }).contains(where: { $0.usedPercent >= 100 }),
+           windowsAvailable(usage, at: now()) {
+            claudeRestoredAt = updatedAt
+        } else if usage == nil || usage.map({ !windowsAvailable($0, at: now()) }) == true {
+            claudeRestoredAt = nil
+        }
+        claudeUsage = usage
+        evaluate()
+    }
+
+    private func quotaAvailable(for session: AgentSession, at time: Date) -> Bool {
+        guard let limit = session.logState.limit, let loggedAt = limit.loggedAt else { return false }
+        let usage: AgentUsage?
+        switch session.agent {
+        case .codex:
+            guard limit.window == "primary" || limit.window == "secondary",
+                  codexAccountUsage?.source == .liveAccount else { return false }
+            usage = codexAccountUsage
+        case .claude:
+            guard let restoredAt = claudeRestoredAt, restoredAt > loggedAt else { return false }
+            usage = claudeUsage
+        }
+        guard let usage, let updatedAt = usage.updatedAt, updatedAt > loggedAt,
+              (0...120).contains(time.timeIntervalSince(updatedAt)) else { return false }
+        return windowsAvailable(usage, at: time)
+    }
+
+    private func windowsAvailable(_ usage: AgentUsage, at time: Date) -> Bool {
+        // Require both windows: resetting the short window cannot unblock a full weekly quota.
+        guard let fiveHour = usage.fiveHour, let weekly = usage.weekly else { return false }
+        return [fiveHour, weekly].allSatisfy { window in
+            guard let reset = window.resetsAt, reset > time,
+                  let percent = window.percent(at: time) else { return false }
+            return percent.isFinite && (0..<100).contains(percent)
+        }
     }
 
     // MARK: - User actions
@@ -260,8 +316,24 @@ public final class ResumeEngine {
                 }
                 if limit.loggedAt != pending.limit.loggedAt, let reset = limit.resetAt {
                     pending.limit = limit
+                    pending.quotaRestoredAt = nil
                     pending.fireAt = reset.addingTimeInterval(settings.resetDelay)
                     pending.phase = .waiting
+                    rows[i].pending = pending
+                }
+                if pending.attempts == 0, let reset = limit.resetAt {
+                    if quotaAvailable(for: rows[i].session, at: t) {
+                        if pending.quotaRestoredAt == nil {
+                            pending.quotaRestoredAt = t
+                            log("Quota is available again for \(rows[i].session.name)", about: rows[i].session)
+                        }
+                        pending.fireAt = min(reset.addingTimeInterval(settings.resetDelay),
+                                             pending.quotaRestoredAt!.addingTimeInterval(settings.resetDelay))
+                    } else if pending.quotaRestoredAt != nil {
+                        pending.quotaRestoredAt = nil
+                        pending.fireAt = reset.addingTimeInterval(settings.resetDelay)
+                        pending.phase = .waiting
+                    }
                     rows[i].pending = pending
                 }
                 if t >= pending.fireAt { attemptResume(at: i, userInitiated: false) }
@@ -283,6 +355,7 @@ public final class ResumeEngine {
                     let delay = Self.retryDelays[pending.attempts - 1]
                     pending.limit = limit
                     pending.fireAt = t.addingTimeInterval(delay)
+                    pending.quotaRestoredAt = nil
                     pending.phase = .waiting
                     rows[i].pending = pending
                     log("\(rows[i].session.name) still limited; retrying in \(Int(delay / 60)) min", about: rows[i].session)
@@ -352,6 +425,19 @@ public final class ResumeEngine {
                   self.rows[current].pending?.phase == .sending else { return }
             if !userInitiated {
                 guard self.rows[current].enabled else { return }
+                if let fresh, let freshLimit = fresh.logState.limit, freshLimit != self.rows[current].pending?.limit {
+                    // A new limit arrived while revalidating; never send against the previous one.
+                    self.rows[current].session = fresh
+                    self.rows[current].pending = nil
+                    self.evaluate()
+                    return
+                }
+                if self.rows[current].pending?.quotaRestoredAt != nil,
+                   let fresh, fresh.logState.limit != nil, !self.quotaAvailable(for: fresh, at: self.now()) {
+                    self.rows[current].pending?.phase = .waiting
+                    self.evaluate()
+                    return
+                }
                 let away = self.activityMonitor.isScreenLocked || self.activityMonitor.idleSeconds >= self.settings.idleThreshold
                 if !away {
                     self.rows[current].pending?.phase = .askedUser

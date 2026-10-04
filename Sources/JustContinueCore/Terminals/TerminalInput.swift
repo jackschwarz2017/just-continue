@@ -2,6 +2,7 @@ import Foundation
 
 public struct InputError: Error, CustomStringConvertible, Sendable {
     public var description: String
+    public init(description: String) { self.description = description }
 }
 
 /// Types into a located tab/pane without focusing it.

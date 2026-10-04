@@ -29,7 +29,7 @@ final class ShortcutRecorderField: NSTextField {
     var shortcut: GlobalHotKey.Shortcut? { didSet { refresh() } }
 
     private(set) var isRecording = false { didSet { refresh(); onRecording(isRecording) } }
-    private let clearButton = NSButton()
+    private let clearButton = ShortcutClearButton()
 
     init() {
         super.init(frame: .zero)
@@ -138,4 +138,25 @@ final class ShortcutRecorderField: NSTextField {
     }
 
     @objc private func windowEnded() { endRecording() }
+}
+
+/// The shortcut recorder uses an AppKit button, so it needs its own tracking area.
+private final class ShortcutClearButton: NSButton {
+    private var hoverTracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        if isEnabled { contentTintColor = .controlAccentColor }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        contentTintColor = .tertiaryLabelColor
+    }
 }

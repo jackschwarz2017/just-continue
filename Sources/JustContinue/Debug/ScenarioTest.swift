@@ -28,6 +28,7 @@ enum ScenarioTest {
                 debug.removeSimulatedSessions()
                 debug.claudeInstalled = nil; debug.codexInstalled = nil
                 debug.hideUsage = false; debug.notificationsOff = false; debug.activity = nil
+                debug.terminalAccessDenied = false
                 model.dryRun = false
                 model.notifications.prefersSystem = { model.alertStyle == .system }
                 banner.hide()
@@ -175,6 +176,42 @@ enum ScenarioTest {
             }
             model.keepAwakeManually = false
             check("15 off again", !engine.isKeepingAwake || engine.rows.contains(where: \.enabled))
+
+            await reset()
+            model.recordTerminalAccess(.denied, for: TerminalBundle.terminal)
+            check("16 denied terminal access shows reminder", items().contains {
+                $0.view?.accessibilityLabel()?.hasPrefix("Allow terminal access to continue") == true
+            })
+            model.recordTerminalAccess(.granted, for: TerminalBundle.terminal)
+            check("16 granted access removes reminder", !items().contains {
+                $0.view?.accessibilityLabel()?.hasPrefix("Allow terminal access to continue") == true
+            })
+            let oldUsage = AgentUsage(fiveHour: .init(kind: .fiveHour, usedPercent: 80,
+                resetsAt: Date().addingTimeInterval(-60)), weekly: .init(kind: .weekly, usedPercent: 35,
+                resetsAt: Date().addingTimeInterval(86400)), updatedAt: Date().addingTimeInterval(-172800))
+            let savedUsage = model.showUsage, savedClaude = model.showClaudeUsage, savedCodex = model.showCodexUsage
+            model.showUsage = true; model.showClaudeUsage = true; model.showCodexUsage = true
+            debug.demoUsage = (claude: oldUsage, codex: oldUsage)
+            let usageLabels = items().compactMap { $0.view?.accessibilityLabel() }
+            check("17 expired usage is unavailable", usageLabels.contains { $0.contains("5-hour · Usage unavailable") })
+            check("17 old usage is labelled last seen", usageLabels.contains { $0.contains("Weekly · Last seen 35% used") })
+            debug.demoUsage = nil
+            model.showUsage = savedUsage; model.showClaudeUsage = savedClaude; model.showCodexUsage = savedCodex
+
+            await reset()
+            debug.terminalAccessDenied = true
+            await tick()
+            check("18 denied-access simulation isolates discovery", engine.rows.count == 1 && engine.rows.first?.id.pid == -9999)
+            check("18 denied-access simulation shows reminder", items().contains {
+                $0.view?.accessibilityLabel()?.hasPrefix("Allow terminal access to continue") == true
+            })
+            check("18 denied-access session cannot be enabled", engine.rows.first?.canEnable == false)
+            let blockedInput = DebugInput(real: TerminalInputSender(), denied: debug.deniedOverride, simulated: debug.simulated)
+            let blockedResult = blockedInput.send("continue", to: .init(kind: .iTerm, identifier: "simulated:blocked", title: "Test"))
+            check("18 denied-access simulation blocks input", { if case .failure = blockedResult { return true }; return false }())
+            debug.terminalAccessDenied = false
+            await tick()
+            check("18 disabling simulation removes its session", !engine.rows.contains { $0.id.pid == -9999 })
 
             // Restore.
             model.resetDelaySeconds = saved.0

@@ -5,8 +5,10 @@ import Foundation
 
 /// Automation (Apple Events) permission per terminal. macOS can't show the consent prompt
 /// while the screen is locked, so users grant it up front in Settings.
-enum AutomationPermission: Equatable {
+enum AutomationPermission: Equatable, Sendable {
     case granted, denied, notDetermined, notRunning, unknown(OSStatus)
+
+    var needsAccess: Bool { self == .denied || self == .notDetermined }
 
     var label: String {
         switch self {
@@ -36,7 +38,7 @@ enum AutomationPermission: Equatable {
     }
 }
 
-struct ScriptableTerminal: Identifiable {
+struct ScriptableTerminal: Identifiable, Sendable {
     let name: String
     let bundleID: String
     var note: String? = nil

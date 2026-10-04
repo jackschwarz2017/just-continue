@@ -68,7 +68,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === self.menu else { return }
-        if model.showUsage { model.refreshClaudeUsage() }
+        if model.showUsage {
+            model.refreshClaudeUsage()
+            model.refreshCodexUsage()
+        }
+        model.refreshTerminalAccess()
         rebuild()
     }
 
@@ -107,6 +111,17 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             }
             menu.addItem(lid)
             menu.addItem(separator)
+        }
+
+        if !model.terminalsNeedingAccess.isEmpty {
+            let notice = NSMenuItem()
+            let names = model.terminalsNeedingAccess.map(\.name).joined(separator: ", ")
+            notice.view = MenuNoticeView(title: "Allow terminal access to continue", subtitle: "\(names) · Open Settings") { [weak self] in
+                self?.menu.cancelTracking()
+                DispatchQueue.main.async { self?.openSettings(.terminals) }
+            }
+            menu.addItem(notice)
+            menu.addItem(.separator())
         }
 
         if model.showUsage { addUsage() }
@@ -226,29 +241,40 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             setSubtitle(item, setUp ? "Claude Code updates it as you work" : "Connect in Settings")
             menu.addItem(item)
         }
-        if model.showCodexUsage, let usage = model.visibleCodexUsage {
-            addUsage(title: "Codex", usage: usage)
+        if model.showCodexUsage {
+            if let usage = model.visibleCodexUsage {
+                addUsage(title: "Codex", usage: usage)
+            } else if model.isInstalled(.codex), !model.debug.hideUsage {
+                menu.addItem(.sectionHeader(title: "Codex"))
+                let item = NSMenuItem(title: "Usage unavailable", action: #selector(showUsageSettings), keyEquivalent: "")
+                item.target = self
+                setSubtitle(item, model.codexUsageMessage)
+                menu.addItem(item)
+            }
         }
     }
 
     /// Usage rows are text only: readable, not clickable.
-    private func addUsage(title: String, usage: AgentUsage) {
-        menu.addItem(.sectionHeader(title: title))
+    private func addUsage(title agentTitle: String, usage: AgentUsage) {
+        menu.addItem(.sectionHeader(title: agentTitle))
         let now = Date()
         for window in [usage.fiveHour, usage.weekly].compactMap({ $0 }) {
-            let percent = Int(window.percent(at: now).rounded())
+            let percent = window.percent(at: now).map { Int($0.rounded()) }
             let name = window.kind == .fiveHour ? "5-hour" : "Weekly"
+            let age = usage.updatedAt.map { now.timeIntervalSince($0) } ?? .infinity
+            let stale = age > 5 * 60
+            let title: String
             var subtitle: String
-            if let resetsAt = window.resetsAt {
-                subtitle = resetsAt <= now ? "Reset \(Format.when(resetsAt))" : "Resets \(Format.time(resetsAt))"
+            if let percent {
+                title = "\(name) · \(stale ? "Last seen " : "")\(percent)% used"
+                subtitle = window.resetsAt.map { "Resets \(Format.time($0))" } ?? "Reset time unknown"
+                if stale { subtitle = usage.updatedAt.map { "Updated \(Format.time($0))" } ?? "Update time unknown" }
             } else {
-                subtitle = "Reset time unknown"
-            }
-            if let updated = usage.updatedAt, now.timeIntervalSince(updated) > 3600, (window.resetsAt ?? .distantFuture) > now {
-                subtitle += " · as of \(Format.time(updated))"
+                title = "\(name) · Usage unavailable"
+                subtitle = usage.source == .liveAccount ? "Waiting for an account update" : "Use \(agentTitle) on this Mac to refresh"
             }
             let item = NSMenuItem()
-            item.view = MenuNoticeView(title: "\(name) · \(percent)% used", subtitle: subtitle)
+            item.view = MenuNoticeView(title: title, subtitle: subtitle)
             menu.addItem(item)
         }
     }
@@ -273,11 +299,19 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     private func sessionContent(_ row: SessionRow) -> MenuRowView.Content {
-        .init(title: Format.short(row.session.name), subtitle: row.subtitle, checked: row.enabled, enabled: row.canEnable)
+        let needsAccess = model.terminalNeedingAccess(for: row) != nil
+        return .init(title: Format.short(row.session.name),
+                     subtitle: needsAccess ? "Allow terminal access to continue" : row.subtitle,
+                     checked: row.enabled, enabled: row.canEnable && !needsAccess)
     }
 
     private func clickSession(_ key: SessionKey) {
         guard let row = model.engine.rows.first(where: { $0.id == key }) else { return }
+        if model.terminalNeedingAccess(for: row) != nil {
+            menu.cancelTracking()
+            DispatchQueue.main.async { self.openSettings(.terminals) }
+            return
+        }
         guard row.canEnable else {
             // Explaining needs an alert; close the menu first.
             menu.cancelTracking()
@@ -450,6 +484,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     private func explain(_ row: SessionRow) {
+        if model.terminalNeedingAccess(for: row) != nil { openSettings(.terminals); return }
         let alert = NSAlert()
         switch row.session.resumability {
         case .ambiguous:

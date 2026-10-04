@@ -5,6 +5,11 @@ public protocol SessionDiscovering: Sendable {
     func scan(previous: [SessionKey: TerminalLocation]) -> [AgentSession]
     /// Fresh, single-session check right before typing.
     func revalidate(_ session: AgentSession) -> AgentSession?
+    func invalidateTerminalCache()
+}
+
+extension SessionDiscovering {
+    public func invalidateTerminalCache() {}
 }
 
 public struct SessionDiscovery: SessionDiscovering {
@@ -87,6 +92,8 @@ public struct SessionDiscovery: SessionDiscovering {
                             logURL: logURL, logState: state, resumability: resumability, agentVersion: version)
     }
 
+    public func invalidateTerminalCache() { snapshots.invalidate() }
+
     public func revalidate(_ session: AgentSession) -> AgentSession? {
         guard let entry = ProcessTable.entry(pid: session.id.pid), abs(entry.startTime - session.id.startTime) < 1,
               entry.tty == session.tty else { return nil }
@@ -114,6 +121,8 @@ final class SnapshotCache: @unchecked Sendable {
     static let maxAge: TimeInterval = 30
     private var cached: (keys: Set<SessionKey>, takenAt: Date, snapshot: TerminalSnapshot)?
     private let lock = NSLock()
+
+    func invalidate() { lock.withLock { cached = nil } }
 
     func snapshot(for keys: Set<SessionKey>, now: Date = Date(), capture: () -> TerminalSnapshot = TerminalSnapshot.capture) -> TerminalSnapshot {
         if let c = lock.withLock({ cached }), c.keys == keys, now.timeIntervalSince(c.takenAt) < Self.maxAge {

@@ -1,3 +1,4 @@
+import AppKit
 import JustContinueCore
 import Foundation
 import Observation
@@ -87,6 +88,7 @@ final class AppModel {
     @ObservationIgnored var onShortcutChange: ((GlobalHotKey.Shortcut?) -> Void)?
     /// Opens the diagnostic report window (set by the app delegate).
     @ObservationIgnored var openDiagnostics: (() -> Void)?
+    var isCreatingReport = false
     /// True while the shortcut field is recording; the global shortcut is paused meanwhile.
     var isRecordingShortcut = false { didSet { onShortcutChange?(isRecordingShortcut ? nil : shortcut) } }
     /// Set when another app already registered the shortcut globally.
@@ -114,6 +116,89 @@ final class AppModel {
     private(set) var claudeUsage: AgentUsage?
     private(set) var codexUsage: AgentUsage?
     private var usageTask: Task<Void, Never>?
+    private var codexUsageTask: Task<Void, Never>?
+    var isRefreshingCodexUsage: Bool { codexUsageTask != nil }
+    private var lastCodexUsageAttempt: Date?
+    private(set) var codexUsageMessage = "Checking account usage…"
+    private(set) var terminalAccess: [String: AutomationPermission] = [:]
+    private var checkingTerminalAccess = false
+
+    func effectiveTerminalAccess(_ bundleID: String) -> AutomationPermission? {
+        if debug.terminalAccessDenied, bundleID == TerminalBundle.terminal { return .denied }
+        return terminalAccess[bundleID]
+    }
+
+    var terminalsNeedingAccess: [ScriptableTerminal] {
+        ScriptableTerminal.all.filter { terminal in
+            guard effectiveTerminalAccess(terminal.bundleID)?.needsAccess == true else { return false }
+            return engine.rows.isEmpty || engine.rows.contains { terminalNeedingAccess(for: $0)?.bundleID == terminal.bundleID }
+        }
+    }
+
+    func terminalNeedingAccess(for row: SessionRow) -> ScriptableTerminal? {
+        let name: String?
+        switch row.session.resumability {
+        case .ready(let target):
+            if target.kind == .tmux { return nil }
+            name = target.kind.displayName
+        case .unsupported(let host): name = host
+        case .ambiguous(let kind): name = kind.displayName
+        }
+        return ScriptableTerminal.all.first {
+            effectiveTerminalAccess($0.bundleID)?.needsAccess == true &&
+            (name == $0.name || name == "iTerm" && $0.bundleID == TerminalBundle.iTerm ||
+             name == "Terminal.app" && $0.bundleID == TerminalBundle.terminal ||
+             name?.hasPrefix("Ghostty") == true && $0.bundleID == TerminalBundle.ghostty)
+        }
+    }
+
+    func recordTerminalAccess(_ status: AutomationPermission, for bundleID: String) {
+        let changed = terminalAccess[bundleID] != status
+        terminalAccess[bundleID] = status
+        if changed { Task { await engine.refreshTerminalLocations() } }
+    }
+
+    func refreshTerminalAccess() {
+        guard !checkingTerminalAccess, !debug.hideRealSessions.value else { return }
+        checkingTerminalAccess = true
+        Task {
+            let statuses = await Task.detached {
+                Dictionary(uniqueKeysWithValues: ScriptableTerminal.all.compactMap { terminal -> (String, AutomationPermission)? in
+                    guard NSRunningApplication.runningApplications(withBundleIdentifier: terminal.bundleID).isEmpty == false else { return nil }
+                    return (terminal.bundleID, AutomationPermission.check(bundleID: terminal.bundleID, ask: false))
+                })
+            }.value
+            let changed = terminalAccess != statuses
+            terminalAccess = statuses
+            checkingTerminalAccess = false
+            if changed { await engine.refreshTerminalLocations() }
+        }
+    }
+
+    func refreshCodexUsage(force: Bool = false) {
+        let waitingForCodex = engine.rows.contains { $0.enabled && $0.session.agent == .codex && $0.session.logState.limit != nil }
+        guard (showUsage && showCodexUsage) || waitingForCodex else { return }
+        guard isInstalled(.codex), !debug.hideRealSessions.value,
+              codexUsageTask == nil else { return }
+        // Explicit refreshes always run once the previous request has finished.
+        guard force || (lastCodexUsageAttempt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true) else { return }
+        lastCodexUsageAttempt = Date()
+        codexUsageMessage = "Checking account usage…"
+        codexUsageTask = Task {
+            let result = await Task.detached { CodexAccountUsage.fetch() }.value
+            switch result {
+            case .success(let usage):
+                codexUsage = usage
+                engine.updateCodexAccountUsage(usage)
+                codexUsageMessage = "Live account usage · refreshes every minute"
+            case .failure(let error):
+                codexUsage = nil
+                engine.updateCodexAccountUsage(nil)
+                codexUsageMessage = error.message
+            }
+            codexUsageTask = nil
+        }
+    }
 
     private let defaults = UserDefaults.standard
 
@@ -140,8 +225,8 @@ final class AppModel {
         let debug = self.debug
         let continueClaude = self.continueClaude, hiddenClaudeWaiting = self.hiddenClaudeWaiting
         let real = ClaudeHandoffDiscovery(inner: SessionDiscovery(), continueClaude: continueClaude, hiddenWaiting: hiddenClaudeWaiting)
-        engine = ResumeEngine(discovery: DebugDiscovery(real: real, simulated: debug.simulated, hideReal: debug.hideRealSessions),
-                              input: DebugInput(real: TerminalInputSender(), simulated: debug.simulated),
+        engine = ResumeEngine(discovery: DebugDiscovery(real: real, simulated: debug.simulated, hideReal: debug.hideRealSessions, denied: debug.deniedOverride),
+                              input: DebugInput(real: TerminalInputSender(), denied: debug.deniedOverride, simulated: debug.simulated),
                               activity: DebugActivity(real: SystemActivity(), override: debug.activityOverride))
         engine.settings = engineSettings
         engine.logSink = { DiagnosticLog.shared.write($0) }
@@ -202,15 +287,16 @@ final class AppModel {
         engine.evaluate()
     }
 
-    /// Plan usage for the menu, refreshed every 30 s. Claude Code's file is also re-read whenever the
-    /// menu opens (`refreshClaudeUsage`), so a status-line update shows right away.
+    /// Local Claude snapshots refresh every 30 s; Codex account requests are throttled to a minute.
     func startUsageUpdates() {
         usageTask?.cancel()
         usageTask = Task { [weak self] in
             while !Task.isCancelled {
-                let (claude, codex) = await Task.detached { (UsageReader.claude(), UsageReader.codex()) }.value
+                let claude = await Task.detached { UsageReader.claude() }.value
                 self?.claudeUsage = claude
-                self?.codexUsage = codex
+                self?.engine.updateClaudeUsage(claude)
+                self?.refreshCodexUsage()
+                self?.refreshTerminalAccess()
                 try? await Task.sleep(for: .seconds(30))
             }
         }
@@ -219,6 +305,7 @@ final class AppModel {
     /// One small file read; cheap enough to do as the menu opens.
     func refreshClaudeUsage() {
         claudeUsage = UsageReader.claude()
+        engine.updateClaudeUsage(claudeUsage)
     }
 
     // MARK: - Launch at login

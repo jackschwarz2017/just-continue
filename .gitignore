@@ -15,3 +15,6 @@ xcuserdata/
 probe/out/
 probe/probe
 probe/axprobe
+
+# Personal maintainer notes
+.local/

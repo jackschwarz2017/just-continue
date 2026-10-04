@@ -13,6 +13,9 @@ enum DebugSnapshot {
         Task { @MainActor in
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             model.engine.settings.dryRun = true  // never type from a render run
+            if args.contains("--deny-terminal-access") {
+                model.debug.terminalAccessDenied = true
+            }
             model.startUsageUpdates()
             if args.contains("--simulate") {
                 // Simulated sessions only, for screenshots.

@@ -7,13 +7,20 @@
 Just Continue resumes **Codex CLI sessions after usage limits reset**. It runs in your macOS
 menu bar and sends **`continue` followed by Return** to the terminal sessions you enable.
 
+Supports **Terminal.app, iTerm2, Ghostty 1.3+, and tmux**. Other terminals work through tmux.
+
+[GitHub](https://github.com/jackschwarz2017/just-continue) ·
+[Report an issue](https://github.com/jackschwarz2017/just-continue/issues) ·
+[Sponsor](https://github.com/sponsors/jackschwarz2017)
+
 Keep those sessions open. The app reads their logs for the reset time, waits for the configured
 delay, then sends the message when your Mac is idle or locked. If you're active, it shows a
 notification instead. Before sending, it checks the session and terminal; afterward, it checks
 for progress and retries if needed.
 
 It also keeps your Mac awake while sessions are enabled and shows plan usage in the menu.
-Everything runs locally. Claude Code is supported too, as described below.
+Session monitoring runs locally. Codex usage is fetched through your signed-in Codex CLI.
+Claude Code is supported too, as described below.
 
 <p align="center">
   <img src="docs/images/menu.png" width="359" alt="Sessions grouped by terminal, with plan usage and a scheduled continuation">
@@ -39,10 +46,11 @@ mv "build/Just Continue.app" /Applications/
 open "/Applications/Just Continue.app"
 ```
 
-Supports **Codex CLI** and **Claude Code CLI** in Terminal.app, iTerm2, Ghostty 1.3+, or tmux.
-Other terminals work through tmux. Agent desktop apps aren't supported.
+Works with **Codex CLI** and **Claude Code CLI**. Agent desktop apps aren't supported.
 
-Open **Settings › Terminals** and allow terminal access before leaving your Mac.
+Open **Settings › Terminals** and allow terminal access before leaving your Mac. If access is
+missing, the menu shows **Allow terminal access to continue**. Click it to finish setup; if you
+previously denied access, Settings links to macOS Privacy & Security › Automation.
 Keep a laptop's lid open unless it's set up to stay awake with an external display.
 
 ## Use
@@ -55,7 +63,7 @@ Settings let you change the message, delay after reset, idle threshold, shortcut
 or enable new sessions automatically.
 
 <p align="center">
-  <img src="docs/images/settings.png" width="520" alt="General settings, including Claude Code handling and the menu shortcut">
+  <img src="docs/images/settings.png" width="520" alt="General settings with the menu shortcut, Claude Code handling, and GitHub and Sponsor links">
 </p>
 
 <details>
@@ -70,24 +78,42 @@ or enable new sessions automatically.
 
 ### Plan usage
 
-Turn on **Show usage in the menu** in **Settings › Usage**. Codex usage is read automatically.
-For Claude Code, click **Connect** to copy usage data from its status line. This backs up and
-updates `~/.claude/settings.json`, preserving your existing status-line command.
-**Disconnect** removes the added step.
+Turn on **Show usage in the menu** in **Settings › Usage**. Codex usage is fetched from your
+account every minute through the installed Codex CLI, including usage on your other Macs.
+Sign in to Codex with ChatGPT first. If the request fails, the app shows usage as unavailable.
+If a reset card restores quota early, fresh readings showing both limits below 100% let enabled
+Codex sessions continue after your configured delay. These checks also run while enabled Codex
+sessions are waiting with the usage display hidden; idle and terminal checks still apply.
+
+For Claude Code, click **Connect** to copy usage data from its status line. This is a local
+snapshot, not a live account query: old readings are labelled “Last seen”, and expired windows
+show usage as unavailable. Connecting backs up and updates `~/.claude/settings.json`,
+preserving your existing status-line command.
+**Disconnect** removes the added step. For sessions handled by Just Continue, a newer snapshot
+showing usage drop from exhausted to available can also shorten the wait. A Claude reset card
+cannot be detected until Claude supplies updated usage data.
 
 <p align="center">
-  <img src="docs/images/settings-usage.png" width="520" alt="Usage settings with per-agent switches and Connect for Claude Code">
+  <img src="docs/images/settings-usage.png" width="520" alt="Usage settings with live Codex account refresh and Connect for Claude Code">
 </p>
 
 ## Privacy and troubleshooting
 
 The app reads local process information, agent session logs in `~/.claude` and `~/.codex`,
-and idle status—not your keystrokes. It sends no telemetry. Terminal input uses AppleScript
-or `tmux send-keys`.
+and idle status—not your keystrokes. For live usage, it asks the Codex CLI to contact OpenAI
+using your existing sign-in; Just Continue never reads or stores your account tokens. It sends
+no app telemetry. Terminal input uses AppleScript or `tmux send-keys`.
 
 If a session can't be enabled, hold **⌥** and choose **How to Enable…**. For other problems,
 turn on **Settings › Troubleshooting › Detailed logging**, reproduce the issue, and use
-**Create Report…**. Review the report before sharing it.
+**Create Report…**. Review the report, then choose **Open an Issue…** to report the bug on GitHub.
+
+<details>
+<summary>Troubleshooting settings</summary>
+<p align="center">
+  <img src="docs/images/settings-troubleshooting.png" width="520" alt="Troubleshooting settings with detailed logging, Create Report, and a separate Open an Issue button">
+</p>
+</details>
 
 Rebuilding can reset macOS Automation permissions. To use a stable signing identity:
 
@@ -114,8 +140,6 @@ Debug tools:
 .build/debug/JustContinue --render /tmp/ui --demo
 .build/debug/JustContinue --list-sessions
 ```
-
-For Developer ID signing, notarization, and Intel builds, see [the release guide](docs/RELEASING.md).
 
 ## License
 

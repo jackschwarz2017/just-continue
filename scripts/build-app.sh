@@ -2,6 +2,7 @@
 # Builds build/Just Continue.app from the Swift package.
 #
 #   scripts/build-app.sh                 # universal (Apple Silicon + Intel), ad-hoc signed
+#   CONFIGURATION=debug APP_PATH="build/Just Continue Debug.app" scripts/build-app.sh
 #   ARCHS=x86_64 scripts/build-app.sh    # Intel only
 #   SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
 #   DEBUG_MENU=1 scripts/build-app.sh   # include the hidden Debug menu (hold ⌥ when opening the menu)
@@ -16,6 +17,9 @@ VERSION=${VERSION:-0.1.0}
 BUILD=${BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}
 SIGN_IDENTITY=${SIGN_IDENTITY:--}
 ARCHS=${ARCHS:-"arm64 x86_64"}
+CONFIGURATION=${CONFIGURATION:-release}
+APP=${APP_PATH:-"build/Just Continue.app"}
+[[ "$CONFIGURATION" == debug || "$CONFIGURATION" == release ]] || { echo "Invalid CONFIGURATION" >&2; exit 1; }
 
 FLAGS=()
 [[ -n "${DEBUG_MENU:-}" ]] && FLAGS=(-Xswiftc -DDEBUG_MENU)
@@ -26,12 +30,11 @@ for BUILD_ARCH in ${=ARCHS}; do
         *) echo "Unsupported architecture: $BUILD_ARCH" >&2; exit 1 ;;
     esac
     BUILD_FLAGS=(--scratch-path ".build/app-$BUILD_ARCH" --triple "$BUILD_ARCH-apple-macosx14.0")
-    swift build -c release --product JustContinue "${BUILD_FLAGS[@]}" "${FLAGS[@]}"
-    BINS+=("$(swift build -c release --show-bin-path "${BUILD_FLAGS[@]}" "${FLAGS[@]}")/JustContinue")
+    swift build -c "$CONFIGURATION" --product JustContinue "${BUILD_FLAGS[@]}" "${FLAGS[@]}"
+    BINS+=("$(swift build -c "$CONFIGURATION" --show-bin-path "${BUILD_FLAGS[@]}" "${FLAGS[@]}")/JustContinue")
 done
 [[ ${#BINS[@]} -gt 0 ]] || { echo "ARCHS must include arm64 or x86_64" >&2; exit 1; }
 
-APP="build/Just Continue.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 if [[ ${#BINS[@]} -eq 1 ]]; then

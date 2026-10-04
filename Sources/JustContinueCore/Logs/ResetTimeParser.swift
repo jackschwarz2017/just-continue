@@ -8,7 +8,7 @@ import Foundation
 /// The messages have no date, so the result is the next occurrence after `reference`.
 public enum ResetTimeParser {
     // NSRegularExpression is thread-safe.
-    nonisolated(unsafe) private static let regex = try! NSRegularExpression(
+    private static let regex = try! NSRegularExpression(
         pattern: #"(?:resets|try again at|continuing automatically at)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\.?(?:\s*\(([A-Za-z_]+/[A-Za-z_/+-]+|UTC|GMT)\))?"#,
         options: [.caseInsensitive])
 

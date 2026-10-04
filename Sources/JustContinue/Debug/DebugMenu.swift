@@ -26,6 +26,10 @@ enum DebugMenu {
         menu.addItem(toggle("Claude Code Isn't Installed", debug.claudeInstalled == false) { debug.claudeInstalled = debug.claudeInstalled == false ? nil : false })
         menu.addItem(toggle("Codex Isn't Installed", debug.codexInstalled == false) { debug.codexInstalled = debug.codexInstalled == false ? nil : false })
         menu.addItem(toggle("No Usage Data", debug.hideUsage) { debug.hideUsage.toggle() })
+        menu.addItem(toggle("Terminal Access Is Denied", debug.terminalAccessDenied) {
+            debug.terminalAccessDenied.toggle()
+            refresh(model)
+        })
         menu.addItem(toggle("Notifications Are Off", debug.notificationsOff) { debug.notificationsOff.toggle() })
         menu.addItem(toggle("I'm Away", debug.activity == .away) { debug.activity = debug.activity == .away ? nil : .away; model.engine.evaluate() })
         menu.addItem(toggle("I'm Using My Mac", debug.activity == .active) { debug.activity = debug.activity == .active ? nil : .active; model.engine.evaluate() })
@@ -51,6 +55,7 @@ enum DebugMenu {
                 debug.codexInstalled = nil
                 debug.hideUsage = false
                 debug.notificationsOff = false
+                debug.terminalAccessDenied = false
                 debug.activity = nil
                 model.dryRun = false
                 refresh(model)

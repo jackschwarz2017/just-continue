@@ -94,13 +94,26 @@ struct GeneralTab: View {
                     ClaudeHandoffSection()
                 }
             }
-            VStack(spacing: 6) {
+            VStack(spacing: 10) {
                 Text("Made with ❤️ and 🤖 by [Jack Schwarz](https://www.jackschwarz.com/)")
-                Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0")")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0")")
+                        .foregroundStyle(Color.secondary)
+                    Link(destination: URL(string: "https://github.com/jackschwarz2017/just-continue")!) {
+                        Text("GitHub").underline().padding(.vertical, 6)
+                    }.settingsButtonHover()
+                    Link(destination: URL(string: "https://github.com/sponsors/jackschwarz2017")!) {
+                        Text("Sponsor").underline().padding(.vertical, 6)
+                    }.settingsButtonHover()
+                }
+                .font(.callout)
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
             }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
+            .padding(.top, 16)
             .padding(.bottom, 20)
         }
     }
@@ -177,11 +190,21 @@ struct TroubleshootingTab: View {
                 HStack {
                     Text("Diagnostic report")
                     Spacer()
-                    Button("Create Report…") { model.openDiagnostics?() }
+                    Button(model.isCreatingReport ? "Creating Report…" : "Create Report…") { model.openDiagnostics?() }
+                        .settingsButtonHover()
+                        .disabled(model.isCreatingReport)
+                }
+                HStack {
+                    Text("Report a bug")
+                    Spacer()
+                    Button("Open an Issue…") {
+                        NSWorkspace.shared.open(URL(string: "https://github.com/jackschwarz2017/just-continue/issues/new/choose")!)
+                    }
+                    .settingsButtonHover()
                 }
             } footer: {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("You see the report before sharing it. Project and folder names are replaced.")
+                    Text("Review the report before sharing it in a GitHub issue. Project and folder names are replaced; nothing is sent automatically.")
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
                     AcknowledgementsLink()
@@ -200,6 +223,7 @@ private struct AcknowledgementsLink: View {
         Button("Acknowledgements") { showing = true }
             .buttonStyle(.link)
             .controlSize(.small)
+            .settingsButtonHover()
         .sheet(isPresented: $showing) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Acknowledgements").font(.headline)
@@ -211,7 +235,7 @@ private struct AcknowledgementsLink: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Done") { showing = false }.keyboardShortcut(.defaultAction)
+                    Button("Done") { showing = false }.keyboardShortcut(.defaultAction).settingsButtonHover()
                 }
             }
             .padding(20)
@@ -249,6 +273,7 @@ private struct MessageRow: View {
                 Text("Message")
                 Spacer()
                 Button("Reset") { message = "continue" }
+                    .settingsButtonHover()
                     .disabled(message == "continue")
             }
             ZStack(alignment: .topLeading) {
@@ -334,6 +359,7 @@ private struct NumberRow: View {
 private struct UsageSection: View {
     @Environment(AppModel.self) private var model
     @State private var connected = ClaudeStatusLineSetup.isSetUp()
+    @State private var changingConnection = false
     @State private var error: String?
 
     var body: some View {
@@ -344,7 +370,19 @@ private struct UsageSection: View {
                 Text("5-hour and weekly limits for your agents.")
             }
             if model.showUsage, model.isInstalled(.codex) {
-                Toggle("Codex", isOn: $model.showCodexUsage)
+                Toggle(isOn: $model.showCodexUsage) {
+                    Text("Codex")
+                    Text("Live usage through your Codex sign-in.")
+                }
+                if model.showCodexUsage {
+                    HStack {
+                        Text(model.codexUsageMessage).font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        Button(model.isRefreshingCodexUsage ? "Refreshing…" : "Refresh") { model.refreshCodexUsage(force: true) }
+                            .settingsButtonHover()
+                            .disabled(model.isRefreshingCodexUsage)
+                    }
+                }
             }
             if model.showUsage, model.isInstalled(.claude) {
                 Toggle("Claude Code", isOn: $model.showClaudeUsage)
@@ -353,11 +391,13 @@ private struct UsageSection: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Claude Code usage data")
-                        Text(connected ? "Connected" : "Connect to read its usage")
+                        Text(connected ? "Local snapshot · updates while you use Claude" : "Connect to read its usage")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(connected ? "Disconnect" : "Connect") { toggle() }
+                    Button(changingConnection ? (connected ? "Disconnecting…" : "Connecting…") : (connected ? "Disconnect" : "Connect")) { toggle() }
+                        .settingsButtonHover()
+                        .disabled(changingConnection)
                 }
                 if let error {
                     Text(error).foregroundStyle(.red)
@@ -371,34 +411,60 @@ private struct UsageSection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .task { model.refreshCodexUsage() }
+        .onChange(of: model.showUsage) { _, enabled in if enabled { model.refreshCodexUsage() } }
+        .onChange(of: model.showCodexUsage) { _, enabled in if enabled { model.refreshCodexUsage() } }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            connected = ClaudeStatusLineSetup.isSetUp()
+            if !changingConnection { connected = ClaudeStatusLineSetup.isSetUp() }
+            model.refreshCodexUsage()
         }
     }
 
     private func toggle() {
-        do {
-            if connected { try ClaudeStatusLineSetup.disconnect() } else { try ClaudeStatusLineSetup.connect() }
-            error = nil
-        } catch {
-            self.error = "\(error)"
+        guard !changingConnection else { return }
+        changingConnection = true
+        error = nil
+        let disconnect = connected
+        Task {
+            let result = await Task.detached { () -> (Bool, String?) in
+                do {
+                    if disconnect { try ClaudeStatusLineSetup.disconnect() } else { try ClaudeStatusLineSetup.connect() }
+                    return (ClaudeStatusLineSetup.isSetUp(), nil)
+                } catch {
+                    return (ClaudeStatusLineSetup.isSetUp(), String(describing: error))
+                }
+            }.value
+            connected = result.0
+            error = result.1
+            changingConnection = false
+            model.refreshClaudeUsage()
         }
-        connected = ClaudeStatusLineSetup.isSetUp()
     }
 }
 
 /// The terminals Just Continue supports, and whether macOS lets it type into them.
 private struct SupportedTerminalsSection: View {
+    @Environment(AppModel.self) private var model
     @State private var statuses: [String: AutomationPermission] = [:]
     @State private var asking: String?
+    @State private var checking = false
 
     var body: some View {
         Section {
             ForEach(ScriptableTerminal.all) { terminal in
-                HStack {
-                    Label { Text(terminal.displayName) } icon: { AppIcon(bundleID: terminal.bundleID) }
-                    Spacer()
-                    status(for: terminal)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label { Text(terminal.displayName) } icon: { AppIcon(bundleID: terminal.bundleID) }
+                        Spacer()
+                        status(for: terminal)
+                    }
+                    if terminal.isInstalled, permission(for: terminal) == .denied {
+                        Text("Allow Just Continue to control \(terminal.name) in Privacy & Security → Automation so it can continue your sessions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
             HStack {
@@ -409,10 +475,16 @@ private struct SupportedTerminalsSection: View {
         } header: {
             Text("Supported terminals")
         } footer: {
-            Text("Allow access before you leave: macOS can't ask while the screen is locked. Other terminals work inside tmux.")
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 8) {
+                if model.debug.terminalAccessDenied {
+                    Text("Debug: Terminal access is simulated as denied. Turn off ‘Terminal Access Is Denied’ in the Debug menu to restore normal operation.")
+                        .foregroundStyle(.orange)
+                }
+                Text("Allow access before you leave: macOS can't ask while the screen is locked. Other terminals work inside tmux.")
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task { await refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -420,41 +492,60 @@ private struct SupportedTerminalsSection: View {
         }
     }
 
+    private func permission(for terminal: ScriptableTerminal) -> AutomationPermission? {
+        if model.debug.terminalAccessDenied, terminal.bundleID == TerminalBundle.terminal { return .denied }
+        return statuses[terminal.bundleID]
+    }
+
     @ViewBuilder
     private func status(for terminal: ScriptableTerminal) -> some View {
         if !terminal.isInstalled {
             Text("Not installed").foregroundStyle(.secondary)
         } else {
-            switch statuses[terminal.bundleID] {
+            switch permission(for: terminal) {
             case .granted:
                 Text("Ready").foregroundStyle(.secondary)
             case .notDetermined:
                 Button(asking == terminal.bundleID ? "Asking…" : "Allow Access") { ask(terminal) }
-                    .disabled(asking != nil)
+                    .settingsButtonHover()
+                    .disabled(asking != nil || checking)
             case .denied:
                 Button("Open System Settings") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!)
                 }
+                .settingsButtonHover()
             case .notRunning:
                 Text("Open \(terminal.name) to allow access").foregroundStyle(.secondary)
-            case .unknown, nil:
+            case .unknown:
+                Button(checking ? "Checking…" : "Check Again") { Task { await refresh() } }
+                    .settingsButtonHover()
+                    .disabled(checking || asking != nil)
+            case nil:
                 ProgressView().controlSize(.small)
             }
         }
     }
 
     private func refresh() async {
+        guard !checking, asking == nil else { return }
+        checking = true
+        defer { checking = false }
         for terminal in ScriptableTerminal.all where terminal.isInstalled {
             let id = terminal.bundleID
-            statuses[id] = await Task.detached { AutomationPermission.check(bundleID: id, ask: false) }.value
+            let permission = await Task.detached { AutomationPermission.check(bundleID: id, ask: false) }.value
+            statuses[id] = permission
+            model.recordTerminalAccess(permission, for: id)
         }
     }
 
     private func ask(_ terminal: ScriptableTerminal) {
+        guard asking == nil, !checking else { return }
         asking = terminal.bundleID
         let id = terminal.bundleID
         Task {
-            statuses[id] = await Task.detached { AutomationPermission.check(bundleID: id, ask: true) }.value
+            let permission = await Task.detached { AutomationPermission.check(bundleID: id, ask: true) }.value
+            statuses[id] = permission
+            model.recordTerminalAccess(permission, for: id)
             asking = nil
         }
     }
@@ -472,4 +563,26 @@ private struct AppIcon: View {
             Image(systemName: "terminal").frame(width: 22)
         }
     }
+}
+
+/// Adds hover feedback without replacing native button behavior or keyboard focus.
+private struct SettingsButtonHover: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color.accentColor.opacity(isHovered && isEnabled ? 0.06 : 0))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            .onHover { isHovered = $0 }
+            .animation(.easeOut(duration: 0.12), value: isHovered && isEnabled)
+    }
+}
+
+private extension View {
+    func settingsButtonHover() -> some View { modifier(SettingsButtonHover()) }
 }

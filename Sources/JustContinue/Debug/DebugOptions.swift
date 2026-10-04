@@ -25,6 +25,8 @@ final class DebugOptions {
     var hideUsage = false
     /// Made-up usage (`--demo` screenshots).
     var demoUsage: (claude: AgentUsage, codex: AgentUsage)?
+    var terminalAccessDenied = false { didSet { deniedOverride.value = terminalAccessDenied } }
+    @ObservationIgnored let deniedOverride = Locked(false)
     var notificationsOff = false
     var activity: Activity? { didSet { activityOverride.value = activity } }
 
@@ -107,7 +109,7 @@ final class DebugOptions {
     }
 
     var isActive: Bool {
-        claudeInstalled != nil || codexInstalled != nil || hideUsage || notificationsOff || activity != nil || hasSimulatedSessions
+        claudeInstalled != nil || codexInstalled != nil || hideUsage || terminalAccessDenied || notificationsOff || activity != nil || hasSimulatedSessions
     }
 }
 
@@ -116,22 +118,35 @@ struct DebugDiscovery: SessionDiscovering {
     let real: SessionDiscovering
     let simulated: Locked<[AgentSession]>
     let hideReal: Locked<Bool>
+    let denied: Locked<Bool>
 
-    func scan(previous: [SessionKey: TerminalLocation]) -> [AgentSession] {
-        (hideReal.value ? [] : real.scan(previous: previous)) + simulated.value
+    private var deniedSession: AgentSession {
+        AgentSession(id: SessionKey(pid: -9999, startTime: 1), agent: .codex, tty: "simulated",
+                     cwd: "/tmp/simulated", agentSessionID: "simulated-denied", name: "Simulated · terminal access denied",
+                     logURL: nil, logState: .running, resumability: .unsupported(hostName: "Terminal"))
     }
 
+    func scan(previous: [SessionKey: TerminalLocation]) -> [AgentSession] {
+        if denied.value { return [deniedSession] }
+        return (hideReal.value ? [] : real.scan(previous: previous)) + simulated.value
+    }
+
+    func invalidateTerminalCache() { real.invalidateTerminalCache() }
+
     func revalidate(_ session: AgentSession) -> AgentSession? {
-        session.id.pid < 0 ? simulated.value.first { $0.id == session.id } : (hideReal.value ? nil : real.revalidate(session))
+        guard !denied.value else { return nil }
+        return session.id.pid < 0 ? simulated.value.first { $0.id == session.id } : (hideReal.value ? nil : real.revalidate(session))
     }
 }
 
 /// Never types into simulated sessions; "sending" to one just marks it as running again.
 struct DebugInput: InputSending {
     let real: InputSending
+    let denied: Locked<Bool>
     let simulated: Locked<[AgentSession]>
 
     func send(_ text: String, to location: TerminalLocation) -> Result<Void, InputError> {
+        guard !denied.value else { return .failure(InputError(description: "Terminal access denial is being simulated.")) }
         guard location.identifier.hasPrefix(DebugOptions.simulatedPrefix) else { return real.send(text, to: location) }
         var sessions = simulated.value
         if let i = sessions.firstIndex(where: { $0.resumability.location?.identifier == location.identifier }) {
@@ -180,5 +195,6 @@ struct ClaudeHandoffDiscovery: SessionDiscovering {
         return all.filter { !ClaudeBuiltInContinue.handles($0, enabled: builtIn) }
     }
 
+    func invalidateTerminalCache() { inner.invalidateTerminalCache() }
     func revalidate(_ session: AgentSession) -> AgentSession? { inner.revalidate(session) }
 }

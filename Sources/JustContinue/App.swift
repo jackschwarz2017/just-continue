@@ -107,7 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showDiagnostics() {
+        guard !model.isCreatingReport else { return }
+        model.isCreatingReport = true
         Task {
+            defer { model.isCreatingReport = false }
             let report = await DiagnosticReport.make(model: model)
             let window = NSWindow(contentViewController: NSHostingController(rootView: DiagnosticsView(report: report)))
             window.title = "Diagnostic Report"

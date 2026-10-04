@@ -194,13 +194,6 @@ enum CodexFixture {
 }
 
 @Suite struct UsageTests {
-    @Test func codexUsesNewestNonNullRateLimits() throws {
-        let usage = try #require(UsageReader.codexUsage(entries: [CodexFixture.tokens99, CodexFixture.tokens100, CodexFixture.premiumNull, CodexFixture.limit].compactMap(JSONLines.parse)))
-        #expect(usage.fiveHour?.usedPercent == 100)
-        #expect(usage.weekly?.usedPercent == 16)
-        #expect(usage.weekly?.resetsAt == Date(timeIntervalSince1970: 1791617891))
-    }
-
     @Test func claudeReadsStatusLineInput() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
@@ -212,10 +205,11 @@ enum CodexFixture {
         #expect(usage.fiveHour?.resetsAt == Date(timeIntervalSince1970: 1791031091))
     }
 
-    @Test func percentDropsToZeroAfterReset() {
+    @Test func expiredSnapshotDoesNotInventZeroUsage() {
         let w = AgentUsage.Window(kind: .fiveHour, usedPercent: 80, resetsAt: Date(timeIntervalSince1970: 100))
         #expect(w.percent(at: Date(timeIntervalSince1970: 50)) == 80)
-        #expect(w.percent(at: Date(timeIntervalSince1970: 150)) == 0)
+        #expect(w.percent(at: Date(timeIntervalSince1970: 100)) == nil)
+        #expect(w.percent(at: Date(timeIntervalSince1970: 150)) == nil)
     }
 
     @Test func statusLineSuggestion() {
