@@ -22,7 +22,7 @@ public struct SystemActivity: ActivityMonitoring {
     }
 }
 
-/// Holds power assertions while auto-resume is on.
+/// Holds power assertions while keeping the Mac awake.
 /// System sleep is always prevented; display sleep only if the user asked for it.
 public final class SleepPreventer: @unchecked Sendable {
     private var systemID: IOPMAssertionID = 0

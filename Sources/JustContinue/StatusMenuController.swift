@@ -528,7 +528,13 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             }
             return
         }
-        model.keepAwakeManually.toggle()
+        if model.engine.isKeepingAwake {
+            // The screen can't stay on while the Mac sleeps, so this turns Keep Screen On off too.
+            model.keepAwakeManually = false
+            model.keepDisplayOn = false
+        } else {
+            model.keepAwakeManually = true
+        }
     }
 
     @objc private func showSettings() { openSettings(nil) }

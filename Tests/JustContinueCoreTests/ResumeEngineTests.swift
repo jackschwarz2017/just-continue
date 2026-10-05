@@ -355,18 +355,35 @@ final class Harness {
         #expect(h.engine.rows.map(\.enabled) == [false, true, false])
     }
 
-    @Test func displayStaysOnOnlyWhenAskedAndAwake() async {
+    @Test func keepScreenOnAlsoKeepsTheMacAwake() async {
         var settings = EngineSettings()
         settings.keepDisplayOn = true
         let h = Harness(settings: settings)
-        await h.show(h.session(.running))
-        #expect(h.sleep.display == false)
-        h.engine.setEnabled(Harness.key, true)
+        await h.show()
+        #expect(h.sleep.held, "no sessions at all, but the screen is kept on")
         #expect(h.sleep.display)
+        #expect(h.engine.isKeepingAwake)
+        await h.show()
+        #expect(h.sleep.held && h.sleep.display, "later scans don't release it")
         h.engine.settings.keepDisplayOn = false
         h.engine.updateSleep()
+        #expect(h.sleep.held == false)
         #expect(h.sleep.display == false)
-        #expect(h.sleep.held)
+    }
+
+    @Test func keepingAwakeLeavesTheScreenOptional() async {
+        let h = Harness()
+        await h.show()
+        h.engine.settings.keepAwakeManually = true
+        await h.show()
+        #expect(h.sleep.held, "no sessions at all")
+        #expect(h.sleep.display == false)
+        await h.show(h.session(.running))
+        h.engine.setEnabled(Harness.key, true)
+        h.engine.settings.keepAwakeManually = false
+        h.engine.updateSleep()
+        #expect(h.sleep.held, "an enabled session keeps it awake")
+        #expect(h.sleep.display == false)
     }
 
     @Test func doesNotTypeIfSessionChangedBeforeSending() async {

@@ -35,7 +35,7 @@ public struct EngineSettings: Sendable, Equatable {
     public var keepAwake = true
     /// Keep the Mac awake even with no session enabled ("Keep Mac Awake" in the menu).
     public var keepAwakeManually = false
-    /// Also keep the display on (and so unlocked by idle) while keeping awake.
+    /// Keep the display on (and so unlocked by idle). Implies keeping the Mac awake.
     public var keepDisplayOn = false
     /// Turn on sessions that start after `autoEnableSince`. Off by default.
     public var autoEnableNew = false
@@ -523,7 +523,8 @@ public final class ResumeEngine {
 
     public func updateSleep() {
         // Awake as soon as any session is set to auto-resume, not only while a reset is pending.
-        let hold = settings.keepAwakeManually || (keepAwakeAlso?() ?? false)
+        // A screen kept on keeps the Mac awake too.
+        let hold = settings.keepAwakeManually || settings.keepDisplayOn || (keepAwakeAlso?() ?? false)
             || (settings.keepAwake && rows.contains(where: \.enabled))
         sleep.set(system: hold, display: settings.keepDisplayOn)
         if hold != isKeepingAwake {
