@@ -18,3 +18,6 @@ probe/axprobe
 
 # Personal maintainer notes
 .local/
+
+# Personal signing and notarization settings
+release.local.conf

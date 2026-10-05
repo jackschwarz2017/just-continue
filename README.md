@@ -84,7 +84,9 @@ For Claude Code, click **Connect** to copy usage data from its status line. This
 snapshot, not a live account query: old readings are labelled “Last seen”, and expired windows
 show usage as unavailable. Connecting backs up and updates `~/.claude/settings.json`,
 preserving your existing status-line command.
-**Disconnect** removes the added step. For sessions handled by Just Continue, a newer snapshot
+**Disconnect** removes the added step. Reinstalling Claude Code or signing in again keeps the
+connection. If something later replaces the status line (for example `/statusline`), the menu
+shows **Usage Disconnected…** and Settings offers **Reconnect**. For sessions handled by Just Continue, a newer snapshot
 showing usage drop from exhausted to available can also shorten the wait. A Claude reset card
 cannot be detected until Claude supplies updated usage data.
 
@@ -110,11 +112,14 @@ turn on **Settings › Troubleshooting › Detailed logging**, reproduce the iss
 </p>
 </details>
 
-Rebuilding can reset macOS Automation permissions. To use a stable signing identity:
+If Settings says a terminal is denied but Just Continue isn't listed in **Privacy & Security ›
+Automation**, the denial usually belongs to an earlier build or copy of the app. Click
+**Reset and Ask Again** under that terminal (this runs `tccutil reset AppleEvents` for Just
+Continue only) and allow access when macOS asks. If it's still denied, a configuration profile
+from your organization may block it; use tmux instead.
 
-```sh
-SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
-```
+Rebuilding can reset macOS Automation permissions. To use a stable signing identity, set
+`SIGN_IDENTITY` in `release.local.conf` (see below) or the environment.
 
 ## Development
 
@@ -124,6 +129,19 @@ Building from source requires **Xcode 26+**. From the repository folder:
 swift build
 swift test
 scripts/build-app.sh                       # universal app in build/
+```
+
+The version shown in Settings comes from `release.conf`.
+
+### Releasing
+
+Copy `release.local.conf.example` to `release.local.conf` (git-ignored) and fill in your
+Developer ID identity, Team ID, and a `notarytool` keychain profile. Then bump `VERSION` (and
+`BUILD`, if set) in `release.conf` and run:
+
+```sh
+scripts/release.sh                         # build, sign, notarize, staple → build/JustContinue-<version>-universal.dmg
+scripts/release.sh --no-notarize           # sign only, to check the setup
 ```
 
 `Sources/JustContinueCore` contains discovery, log parsing, terminal adapters, and the resume

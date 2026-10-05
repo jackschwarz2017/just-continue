@@ -36,6 +36,24 @@ enum AutomationPermission: Equatable, Sendable {
         default: return .unknown(status)
         }
     }
+
+    /// Clears this app's Automation decisions for every terminal, e.g. a denial left over from an
+    /// earlier build that System Settings no longer lists. Returns false if `tccutil` fails.
+    static func resetAll() -> Bool {
+        guard let ourID = Bundle.main.bundleIdentifier else { return false }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "AppleEvents", ourID]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
 }
 
 struct ScriptableTerminal: Identifiable, Sendable {

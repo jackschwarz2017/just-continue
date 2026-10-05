@@ -232,14 +232,19 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             // Hidden by the user.
         } else if let usage = model.visibleClaudeUsage {
             addUsage(title: "Claude Code", usage: usage)
+            if model.debug.demoUsage == nil, model.claudeUsageConnectionLost { addClaudeReconnectItem() }
         } else if model.isInstalled(.claude), !model.debug.hideUsage {
             menu.addItem(.sectionHeader(title: "Claude Code"))
             let setUp = ClaudeStatusLineSetup.isSetUp()
-            let item = NSMenuItem(title: setUp ? "Usage appears after your next message" : "Show Usage…",
-                                  action: #selector(showUsageSettings), keyEquivalent: "")
-            item.target = self
-            setSubtitle(item, setUp ? "Claude Code updates it as you work" : "Connect in Settings")
-            menu.addItem(item)
+            if !setUp && model.claudeUsageConnectionWanted {
+                addClaudeReconnectItem()
+            } else {
+                let item = NSMenuItem(title: setUp ? "Usage appears after your next message" : "Show Usage…",
+                                      action: #selector(showUsageSettings), keyEquivalent: "")
+                item.target = self
+                setSubtitle(item, setUp ? "Claude Code updates it as you work" : "Connect in Settings")
+                menu.addItem(item)
+            }
         }
         if model.showCodexUsage {
             if let usage = model.visibleCodexUsage {
@@ -252,6 +257,14 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
                 menu.addItem(item)
             }
         }
+    }
+
+    /// Shown when the user connected Claude Code before but its status line was replaced since.
+    private func addClaudeReconnectItem() {
+        let item = NSMenuItem(title: "Usage Disconnected…", action: #selector(showUsageSettings), keyEquivalent: "")
+        item.target = self
+        setSubtitle(item, "Status line changed · Reconnect in Settings")
+        menu.addItem(item)
     }
 
     /// Usage rows are text only: readable, not clickable.

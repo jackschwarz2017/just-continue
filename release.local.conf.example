@@ -1,0 +1,7 @@
+# Copy to release.local.conf (git-ignored) and fill in your Apple developer details.
+# List identities with: security find-identity -v -p codesigning
+SIGN_IDENTITY="Developer ID Application: YOUR NAME (YOUR_TEAM_ID)"
+TEAM_ID=YOUR_TEAM_ID
+# Keychain profile created once with:
+#   xcrun notarytool store-credentials "just-continue-notary" --apple-id "you@example.com" --team-id "YOUR_TEAM_ID"
+NOTARY_PROFILE=just-continue-notary

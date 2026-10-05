@@ -95,22 +95,24 @@ struct GeneralTab: View {
                 }
             }
             VStack(spacing: 10) {
-                Text("Made with ❤️ and 🤖 by [Jack Schwarz](https://www.jackschwarz.com/)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 3) {
+                    Text("Made with ❤️ and 🤖 by").foregroundStyle(.secondary)
+                    Link(destination: URL(string: "https://www.jackschwarz.com/")!) { SettingsLinkLabel("Jack Schwarz") }
+                        .buttonStyle(.link)
+                }
+                .font(.footnote)
                 HStack(spacing: 12) {
-                    Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0")")
+                    Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
                         .foregroundStyle(Color.secondary)
                     Link(destination: URL(string: "https://github.com/jackschwarz2017/just-continue")!) {
-                        Text("GitHub").underline().padding(.vertical, 6)
-                    }.settingsButtonHover()
+                        SettingsLinkLabel("GitHub")
+                    }
                     Link(destination: URL(string: "https://github.com/sponsors/jackschwarz2017")!) {
-                        Text("Sponsor").underline().padding(.vertical, 6)
-                    }.settingsButtonHover()
+                        SettingsLinkLabel("Sponsor")
+                    }
                 }
                 .font(.callout)
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
+                .buttonStyle(.link)
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 16)
@@ -136,7 +138,10 @@ private struct ClaudeHandoffSection: View {
         Section {
             Toggle(isOn: $model.continueClaudeSessions) {
                 Text("Continue Claude Code sessions too")
-                Text(.init("\(builtInOn ? "Claude Code resumes automatically. Enable to let Just Continue handle it too." : "Claude Code’s auto-continue is off. Just Continue handles these sessions.") [Learn more](\(ClaudeBuiltInContinue.docsURL.absoluteString))"))
+                Text(builtInOn ? "Claude Code resumes automatically. Enable to let Just Continue handle it too." : "Claude Code’s auto-continue is off. Just Continue handles these sessions.")
+                Link(destination: ClaudeBuiltInContinue.docsURL) { SettingsLinkLabel("Learn more") }
+                    .buttonStyle(.link)
+                    .font(.subheadline)
             }
             .disabled(!builtInOn)
         } header: {
@@ -220,10 +225,9 @@ private struct AcknowledgementsLink: View {
     @State private var showing = false
 
     var body: some View {
-        Button("Acknowledgements") { showing = true }
+        Button { showing = true } label: { SettingsLinkLabel("Acknowledgements") }
             .buttonStyle(.link)
             .controlSize(.small)
-            .settingsButtonHover()
         .sheet(isPresented: $showing) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Acknowledgements").font(.headline)
@@ -391,11 +395,14 @@ private struct UsageSection: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Claude Code usage data")
-                        Text(connected ? "Local snapshot · updates while you use Claude" : "Connect to read its usage")
+                        Text(connected ? "Local snapshot · updates while you use Claude"
+                             : connectionLost ? "Your Claude Code status line changed, so usage stopped updating"
+                             : "Connect to read its usage")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(changingConnection ? (connected ? "Disconnecting…" : "Connecting…") : (connected ? "Disconnect" : "Connect")) { toggle() }
+                    Button(changingConnection ? (connected ? "Disconnecting…" : "Connecting…")
+                           : connected ? "Disconnect" : connectionLost ? "Reconnect" : "Connect") { toggle() }
                         .settingsButtonHover()
                         .disabled(changingConnection)
                 }
@@ -405,7 +412,9 @@ private struct UsageSection: View {
             }
         } footer: {
             if model.showUsage, model.isInstalled(.claude), model.showClaudeUsage, !connected {
-                Text("Claude Code only shares usage with its status line. Connect adds one small step to ~/.claude/settings.json; your status line looks the same.")
+                Text(connectionLost
+                     ? "Something replaced the status line in ~/.claude/settings.json. Reconnect adds the small step back in front of your current status line, or turn off Claude Code above to hide this."
+                     : "Claude Code only shares usage with its status line. Connect adds one small step to ~/.claude/settings.json; your status line looks the same.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -419,6 +428,8 @@ private struct UsageSection: View {
             model.refreshCodexUsage()
         }
     }
+
+    private var connectionLost: Bool { !connected && model.claudeUsageConnectionWanted }
 
     private func toggle() {
         guard !changingConnection else { return }
@@ -436,6 +447,7 @@ private struct UsageSection: View {
             }.value
             connected = result.0
             error = result.1
+            if result.1 == nil { model.claudeUsageConnectionWanted = !disconnect }
             changingConnection = false
             model.refreshClaudeUsage()
         }
@@ -448,6 +460,7 @@ private struct SupportedTerminalsSection: View {
     @State private var statuses: [String: AutomationPermission] = [:]
     @State private var asking: String?
     @State private var checking = false
+    @State private var stillDeniedAfterReset: Set<String> = []
 
     var body: some View {
         Section {
@@ -459,11 +472,26 @@ private struct SupportedTerminalsSection: View {
                         status(for: terminal)
                     }
                     if terminal.isInstalled, permission(for: terminal) == .denied {
-                        Text("Allow Just Continue to control \(terminal.name) in Privacy & Security → Automation so it can continue your sessions.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Allow Just Continue to control \(terminal.name) in Privacy & Security → Automation so it can continue your sessions.")
+                                .foregroundStyle(.secondary)
+                            if stillDeniedAfterReset.contains(terminal.bundleID) {
+                                Text("macOS still denies access without asking. Your organization may manage this setting with a configuration profile; ask your IT administrator, or use tmux instead.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                HStack(spacing: 4) {
+                                    Text("Not listed there?").foregroundStyle(.secondary)
+                                    Button { resetAndAsk(terminal) } label: {
+                                        SettingsLinkLabel(asking == terminal.bundleID ? "Resetting…" : "Reset and Ask Again")
+                                    }
+                                    .buttonStyle(.link)
+                                    .disabled(asking != nil || checking)
+                                }
+                            }
+                        }
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
@@ -480,6 +508,10 @@ private struct SupportedTerminalsSection: View {
                     Text("Debug: Terminal access is simulated as denied. Turn off ‘Terminal Access Is Denied’ in the Debug menu to restore normal operation.")
                         .foregroundStyle(.orange)
                 }
+                if model.debug.staleDenial != nil {
+                    Text("Debug: A stale Terminal denial is simulated. Reset and Ask Again won't change real permissions.")
+                        .foregroundStyle(.orange)
+                }
                 Text("Allow access before you leave: macOS can't ask while the screen is locked. Other terminals work inside tmux.")
                     .foregroundStyle(.secondary)
             }
@@ -490,11 +522,11 @@ private struct SupportedTerminalsSection: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await refresh() }
         }
+        .onChange(of: model.debug.staleDenial) { stillDeniedAfterReset = [] }
     }
 
     private func permission(for terminal: ScriptableTerminal) -> AutomationPermission? {
-        if model.debug.terminalAccessDenied, terminal.bundleID == TerminalBundle.terminal { return .denied }
-        return statuses[terminal.bundleID]
+        model.debug.simulatedAccess(for: terminal.bundleID) ?? statuses[terminal.bundleID]
     }
 
     @ViewBuilder
@@ -549,6 +581,32 @@ private struct SupportedTerminalsSection: View {
             asking = nil
         }
     }
+
+    /// A denial System Settings doesn't list is usually a stale record from another build or copy
+    /// of the app. Resetting clears it (for every terminal) so macOS can show the prompt again.
+    private func resetAndAsk(_ terminal: ScriptableTerminal) {
+        guard asking == nil, !checking else { return }
+        asking = terminal.bundleID
+        let id = terminal.bundleID
+        if model.debug.staleDenial != nil, id == TerminalBundle.terminal {
+            Task {
+                if await model.debug.simulateStaleDenialReset() == .denied { stillDeniedAfterReset.insert(id) }
+                asking = nil
+            }
+            return
+        }
+        Task {
+            let permission = await Task.detached { () -> AutomationPermission in
+                _ = AutomationPermission.resetAll()
+                return AutomationPermission.check(bundleID: id, ask: true)
+            }.value
+            statuses[id] = permission
+            model.recordTerminalAccess(permission, for: id)
+            if permission == .denied { stillDeniedAfterReset.insert(id) }
+            asking = nil
+            await refresh()
+        }
+    }
 }
 
 private struct AppIcon: View {
@@ -580,6 +638,34 @@ private struct SettingsButtonHover: ViewModifier {
             }
             .onHover { isHovered = $0 }
             .animation(.easeOut(duration: 0.12), value: isHovered && isEnabled)
+    }
+}
+
+/// Label for text links (`.buttonStyle(.link)` buttons and `Link`s): no underline until hovered,
+/// like the inline Markdown links. Hover boxes are for bordered buttons only.
+private struct SettingsLinkLabel: View {
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+    private let title: String
+
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        // Set on every move: SwiftUI's pointerStyle(.link) misses some links (it left Sponsor
+        // with the arrow), and AppKit's cursor updates would undo a one-time push.
+        Text(title)
+            .underline(isHovered && isEnabled)
+            .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active:
+                    isHovered = true
+                    if isEnabled { NSCursor.pointingHand.set() }
+                case .ended:
+                    isHovered = false
+                    NSCursor.arrow.set()
+                }
+            }
     }
 }
 

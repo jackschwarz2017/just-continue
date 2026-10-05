@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Re-run under zsh if started with bash or sh.
+[ -n "${ZSH_VERSION:-}" ] || exec /bin/zsh "$0" "$@"
 # Package an existing app without rebuilding or modifying it.
 #   scripts/package-dmg.sh [app-path] [output.dmg]
 # Set SIGN_IDENTITY to a Developer ID Application identity to sign the disk image.

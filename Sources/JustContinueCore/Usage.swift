@@ -70,6 +70,9 @@ public enum UsageReader {
 public enum ClaudeStatusLineSetup {
     public static let teePrefix = "tee ~/.claude/justcontinue-usage.json | "
     public static let silentTee = "tee ~/.claude/justcontinue-usage.json > /dev/null"
+    /// Written by pre-release builds, when the app was called AutoResume. Replaced on Connect, removed on Disconnect.
+    static let legacyTeePrefix = "tee ~/.claude/autoresume-usage.json | "
+    static let legacySilentTee = "tee ~/.claude/autoresume-usage.json > /dev/null"
 
     public struct SetupError: Error, CustomStringConvertible {
         public var description: String
@@ -90,14 +93,17 @@ public enum ClaudeStatusLineSetup {
 
     /// The command to use instead: the existing one with the tee in front, or a silent tee.
     public static func suggestedCommand(current: String?) -> String {
-        guard let current, !current.isEmpty else { return silentTee }
-        return teePrefix + current
+        guard let current, let original = originalCommand(from: current), !original.isEmpty else { return silentTee }
+        return teePrefix + original
     }
 
-    /// The original command, with our tee removed. Nil means there was no status line before.
+    /// The original command, with our tee (current or legacy) removed. Nil means there was no status line before.
     static func originalCommand(from command: String) -> String? {
-        if command == silentTee { return nil }
-        return command.hasPrefix(teePrefix) ? String(command.dropFirst(teePrefix.count)) : command
+        if command == silentTee || command == legacySilentTee { return nil }
+        for prefix in [teePrefix, legacyTeePrefix] where command.hasPrefix(prefix) {
+            return String(command.dropFirst(prefix.count))
+        }
+        return command
     }
 
     public static func connect(home: URL = URL(fileURLWithPath: NSHomeDirectory())) throws {
@@ -121,6 +127,7 @@ public enum ClaudeStatusLineSetup {
             }
         }
         try? FileManager.default.removeItem(at: UsageReader.claudeUsageFile(home: home))
+        try? FileManager.default.removeItem(at: home.appendingPathComponent(".claude/autoresume-usage.json"))
     }
 
     /// Reads, changes and writes settings.json. Refuses to touch a file it can't parse,

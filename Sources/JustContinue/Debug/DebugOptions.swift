@@ -28,6 +28,12 @@ final class DebugOptions {
     var terminalAccessDenied = false { didSet { deniedOverride.value = terminalAccessDenied } }
     @ObservationIgnored let deniedOverride = Locked(false)
     var notificationsOff = false
+    /// Pretends Terminal has a stale Automation denial, to try Settings' "Reset and Ask Again"
+    /// without touching real permissions. The outcome decides what the simulated reset does.
+    enum StaleDenialOutcome { case allowedAfterReset, stillDenied }
+    var staleDenial: StaleDenialOutcome? { didSet { simulatedTerminalAccess = staleDenial == nil ? nil : .denied } }
+    /// Terminal's simulated Automation status while `staleDenial` is set.
+    private(set) var simulatedTerminalAccess: AutomationPermission?
     var activity: Activity? { didSet { activityOverride.value = activity } }
 
     /// Shared with the scanning thread.
@@ -40,6 +46,19 @@ final class DebugOptions {
     nonisolated static let simulatedPrefix = "simulated:"
 
     var hasSimulatedSessions: Bool { !simulated.value.isEmpty }
+
+    /// The status Settings and the menu show instead of the real one, if any is simulated.
+    func simulatedAccess(for bundleID: String) -> AutomationPermission? {
+        if terminalAccessDenied, bundleID == TerminalBundle.terminal { return .denied }
+        return bundleID == TerminalBundle.terminal ? simulatedTerminalAccess : nil
+    }
+
+    /// Stands in for `tccutil reset` plus the consent prompt; returns the simulated result.
+    func simulateStaleDenialReset() async -> AutomationPermission {
+        try? await Task.sleep(for: .seconds(1))
+        simulatedTerminalAccess = staleDenial == .allowedAfterReset ? .granted : .denied
+        return simulatedTerminalAccess ?? .denied
+    }
 
     enum Scenario { case limitSoon, weeklyLimit, unsupported, ambiguousGhostty }
 
@@ -109,7 +128,7 @@ final class DebugOptions {
     }
 
     var isActive: Bool {
-        claudeInstalled != nil || codexInstalled != nil || hideUsage || terminalAccessDenied || notificationsOff || activity != nil || hasSimulatedSessions
+        claudeInstalled != nil || codexInstalled != nil || hideUsage || terminalAccessDenied || staleDenial != nil || notificationsOff || activity != nil || hasSimulatedSessions
     }
 }
 

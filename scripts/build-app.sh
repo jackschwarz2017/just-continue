@@ -1,5 +1,9 @@
 #!/bin/zsh
+# Re-run under zsh if started with bash or sh.
+[ -n "${ZSH_VERSION:-}" ] || exec /bin/zsh "$0" "$@"
 # Builds build/Just Continue.app from the Swift package.
+# VERSION and BUILD come from release.conf, SIGN_IDENTITY from release.local.conf (if present);
+# environment variables override both.
 #
 #   scripts/build-app.sh                 # universal (Apple Silicon + Intel), ad-hoc signed
 #   CONFIGURATION=debug APP_PATH="build/Just Continue Debug.app" scripts/build-app.sh
@@ -11,11 +15,14 @@
 # so you may be asked again after each rebuild. Use a stable identity to avoid that.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/config.sh
 
 BUNDLE_ID=${BUNDLE_ID:-dev.justcontinue.JustContinue}
-VERSION=${VERSION:-0.1.0}
+VERSION=${VERSION:-$(config_value VERSION)}
+BUILD=${BUILD:-$(config_value BUILD)}
 BUILD=${BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}
-SIGN_IDENTITY=${SIGN_IDENTITY:--}
+[[ -n "$VERSION" ]] || { echo "Set VERSION in release.conf" >&2; exit 1; }
+SIGN_IDENTITY=${SIGN_IDENTITY:-$(config_value SIGN_IDENTITY -)}
 ARCHS=${ARCHS:-"arm64 x86_64"}
 CONFIGURATION=${CONFIGURATION:-release}
 APP=${APP_PATH:-"build/Just Continue.app"}

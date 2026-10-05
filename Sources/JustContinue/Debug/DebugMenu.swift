@@ -30,6 +30,12 @@ enum DebugMenu {
             debug.terminalAccessDenied.toggle()
             refresh(model)
         })
+        menu.addItem(toggle("Stale Terminal Denial (Reset Fixes It)", debug.staleDenial == .allowedAfterReset) {
+            debug.staleDenial = debug.staleDenial == .allowedAfterReset ? nil : .allowedAfterReset
+        })
+        menu.addItem(toggle("Stale Terminal Denial (Reset Doesn't Help)", debug.staleDenial == .stillDenied) {
+            debug.staleDenial = debug.staleDenial == .stillDenied ? nil : .stillDenied
+        })
         menu.addItem(toggle("Notifications Are Off", debug.notificationsOff) { debug.notificationsOff.toggle() })
         menu.addItem(toggle("I'm Away", debug.activity == .away) { debug.activity = debug.activity == .away ? nil : .away; model.engine.evaluate() })
         menu.addItem(toggle("I'm Using My Mac", debug.activity == .active) { debug.activity = debug.activity == .active ? nil : .active; model.engine.evaluate() })
@@ -56,6 +62,7 @@ enum DebugMenu {
                 debug.hideUsage = false
                 debug.notificationsOff = false
                 debug.terminalAccessDenied = false
+                debug.staleDenial = nil
                 debug.activity = nil
                 model.dryRun = false
                 refresh(model)

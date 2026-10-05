@@ -74,6 +74,14 @@ final class AppModel {
     var showCodexUsage: Bool = UserDefaults.standard.object(forKey: Keys.showCodexUsage) as? Bool ?? true {
         didSet { defaults.set(showCodexUsage, forKey: Keys.showCodexUsage) }
     }
+    /// Whether the user connected Claude Code's status line. Remembered so that if something else
+    /// rewrites the status line later (e.g. `/statusline`, a dotfiles sync), we can offer to reconnect.
+    /// Reinstalling Claude Code or signing in again keeps ~/.claude/settings.json, so the connection stays.
+    var claudeUsageConnectionWanted: Bool = UserDefaults.standard.bool(forKey: Keys.claudeUsageConnectionWanted) {
+        didSet { defaults.set(claudeUsageConnectionWanted, forKey: Keys.claudeUsageConnectionWanted) }
+    }
+    /// Connected before, but the status line no longer copies usage to Just Continue.
+    var claudeUsageConnectionLost: Bool { claudeUsageConnectionWanted && !ClaudeStatusLineSetup.isSetUp() }
     /// Global shortcut that opens the menu. Nil = none.
     var shortcut: GlobalHotKey.Shortcut? {
         didSet {
@@ -124,8 +132,7 @@ final class AppModel {
     private var checkingTerminalAccess = false
 
     func effectiveTerminalAccess(_ bundleID: String) -> AutomationPermission? {
-        if debug.terminalAccessDenied, bundleID == TerminalBundle.terminal { return .denied }
-        return terminalAccess[bundleID]
+        debug.simulatedAccess(for: bundleID) ?? terminalAccess[bundleID]
     }
 
     var terminalsNeedingAccess: [ScriptableTerminal] {
@@ -279,6 +286,7 @@ final class AppModel {
         defaults.set(resetDelaySeconds, forKey: Keys.resetDelaySeconds)
         defaults.set(keepDisplayOn, forKey: Keys.keepDisplayOn)
         defaults.set(showUsage, forKey: Keys.showUsage)
+        if ClaudeStatusLineSetup.isSetUp() { claudeUsageConnectionWanted = true }
         apply()
     }
 
@@ -336,6 +344,7 @@ final class AppModel {
         static let showUsage = "showUsage"
         static let showClaudeUsage = "showClaudeUsage"
         static let showCodexUsage = "showCodexUsage"
+        static let claudeUsageConnectionWanted = "claudeUsageConnectionWanted"
         static let continueClaudeSessions = "continueClaudeSessions"
         static let shortcut = "shortcut"
         static let detailedLogging = "detailedLogging"

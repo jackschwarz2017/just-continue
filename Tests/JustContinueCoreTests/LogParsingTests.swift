@@ -253,6 +253,21 @@ enum CodexFixture {
         #expect(ClaudeStatusLineSetup.currentCommand(home: home) == nil)
     }
 
+    @Test func connectReplacesLegacyAutoResumeTee() throws {
+        let home = try tempHome(settings: #"{"statusLine":{"type":"command","command":"tee ~/.claude/autoresume-usage.json | bash ~/.claude/sl.sh"}}"#)
+        defer { try? FileManager.default.removeItem(at: home) }
+        #expect(!ClaudeStatusLineSetup.isSetUp(home: home))
+        try ClaudeStatusLineSetup.connect(home: home)
+        #expect(ClaudeStatusLineSetup.currentCommand(home: home) == "tee ~/.claude/justcontinue-usage.json | bash ~/.claude/sl.sh")
+        try ClaudeStatusLineSetup.disconnect(home: home)
+        #expect(ClaudeStatusLineSetup.currentCommand(home: home) == "bash ~/.claude/sl.sh")
+    }
+
+    @Test func legacySilentTeeBecomesCurrentSilentTee() {
+        #expect(ClaudeStatusLineSetup.suggestedCommand(current: "tee ~/.claude/autoresume-usage.json > /dev/null") == ClaudeStatusLineSetup.silentTee)
+        #expect(ClaudeStatusLineSetup.suggestedCommand(current: "") == ClaudeStatusLineSetup.silentTee)
+    }
+
     @Test(arguments: [false, true])
     func failedBackupLeavesSettingsUnchanged(disconnect: Bool) throws {
         let original = #"{"model":"opus","statusLine":{"type":"command","command":"tee ~/.claude/justcontinue-usage.json > /dev/null"}}"#
