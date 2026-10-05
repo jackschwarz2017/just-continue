@@ -54,6 +54,10 @@ Click a session in the menu to enable or disable automatic continuation. Hold **
 **Continue Now**, **Show in Terminal**, and **Reveal in Finder**. **⌃⌥R** opens the menu;
 a dot on the menu-bar icon means at least one session is enabled.
 
+The Mac stays awake while any session is enabled. **Keep Mac Awake** and **Keep Screen On** in
+the menu also work on their own, with no sessions running. Keep Screen On keeps the Mac awake
+too; turning off Keep Mac Awake turns both off.
+
 Settings let you change the message, delay after reset, idle threshold, shortcut, and alerts,
 or enable new sessions automatically.
 
@@ -86,9 +90,10 @@ show usage as unavailable. Connecting backs up and updates `~/.claude/settings.j
 preserving your existing status-line command.
 **Disconnect** removes the added step. Reinstalling Claude Code or signing in again keeps the
 connection. If something later replaces the status line (for example `/statusline`), the menu
-shows **Usage Disconnected…** and Settings offers **Reconnect**. For sessions handled by Just Continue, a newer snapshot
-showing usage drop from exhausted to available can also shorten the wait. A Claude reset card
-cannot be detected until Claude supplies updated usage data.
+shows **Usage Disconnected…** and Settings offers **Reconnect**.
+For sessions handled by Just Continue, a newer snapshot showing usage drop from exhausted to
+available can also shorten the wait. A Claude reset card cannot be detected until Claude
+supplies updated usage data.
 
 <p align="center">
   <img src="docs/images/settings-usage.png" width="520" alt="Usage settings with live Codex account refresh and Connect for Claude Code">
