@@ -146,4 +146,72 @@ struct QuotaRecoveryTests {
         #expect(h.row?.pending == nil)
     }
 
+    @Test func queryTimeoutRetriesWithoutLosingQuotaRecoveryOrTypingEarly() async {
+        let h = Harness()
+        await prepare(h)
+        h.activity.idle.value = 1000 // awake, screen on, and away; no lock required
+        h.engine.updateCodexAccountUsage(usage(h))
+        h.discovery.validationFailure.value = .failed(reason: "iTerm2: query timed out", retryable: true)
+        await h.advance(60)
+        #expect(h.input.sent.value.isEmpty)
+        #expect(h.row?.pending?.validationFailures == 1)
+        #expect(h.row?.outcome == nil)
+        #expect(h.notifier.failed.isEmpty)
+        h.discovery.validationFailure.value = nil
+        h.engine.updateCodexAccountUsage(usage(h))
+        await h.advance(29)
+        #expect(h.input.sent.value.isEmpty, "quota updates must not override query retry delay")
+        await h.advance(1)
+        #expect(h.input.sent.value.count == 1)
+    }
+
+    @Test func queryRetriesAreBoundedAndExplainFailure() async {
+        let h = Harness()
+        await prepare(h)
+        h.activity.locked.value = true
+        h.engine.updateCodexAccountUsage(usage(h))
+        h.discovery.validationFailure.value = .failed(reason: "iTerm2: query timed out", retryable: true)
+        await h.advance(60)
+        for _ in 0..<3 {
+            h.engine.updateCodexAccountUsage(usage(h))
+            await h.advance(30)
+        }
+        #expect(h.row?.pending == nil)
+        #expect(h.notifier.failed == ["iTerm2: query timed out"])
+        await h.advance(60)
+        #expect(h.notifier.failed.count == 1)
+        #expect(h.input.sent.value.isEmpty)
+    }
+
+    @Test func activityAndDisableStillPreventQueryRetryFromSending() async {
+        let h = Harness()
+        await prepare(h)
+        h.activity.locked.value = true
+        h.engine.updateCodexAccountUsage(usage(h))
+        h.discovery.validationFailure.value = .failed(reason: "iTerm2: query timed out", retryable: true)
+        await h.advance(60)
+        h.discovery.validationFailure.value = nil
+        h.activity.locked.value = false
+        await h.advance(30)
+        #expect(h.input.sent.value.isEmpty)
+        #expect(h.row?.pending?.phase == .askedUser)
+        h.engine.setEnabled(Harness.key, false)
+        h.activity.locked.value = true
+        await h.advance(60)
+        #expect(h.input.sent.value.isEmpty)
+        #expect(h.row?.pending == nil)
+    }
+
+    @Test func changedSessionFailsWithoutRetrying() async {
+        let h = Harness()
+        await prepare(h)
+        h.activity.locked.value = true
+        h.engine.updateCodexAccountUsage(usage(h))
+        h.discovery.validationFailure.value = .failed(reason: "Agent terminal changed", retryable: false)
+        await h.advance(60)
+        #expect(h.row?.pending == nil)
+        #expect(h.notifier.failed == ["Agent terminal changed"])
+        #expect(h.input.sent.value.isEmpty)
+    }
+
 }

@@ -34,6 +34,22 @@ import Testing
         #expect(computed == 2)
     }
 
+    @Test func failedTerminalQueryIsNotCached() {
+        let cache = SnapshotCache()
+        var captures = 0
+        let key = SessionKey(pid: 1, startTime: 1)
+        let now = Date()
+        let capture = {
+            captures += 1
+            var snapshot = TerminalSnapshot()
+            snapshot.recordFailure(CommandResult(status: -2, output: "", error: "timeout"), for: .iTerm)
+            return snapshot
+        }
+        _ = cache.snapshot(for: [key], now: now, capture: capture)
+        _ = cache.snapshot(for: [key], now: now.addingTimeInterval(5), capture: capture)
+        #expect(captures == 2)
+    }
+
     @Test func snapshotIsReusedWhileTheSameSessionsRun() {
         let cache = SnapshotCache()
         var captures = 0

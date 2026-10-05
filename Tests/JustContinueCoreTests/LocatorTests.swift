@@ -59,3 +59,63 @@ import Testing
         #expect(AppleScript.literal(#"say "hi" \ bye"#) == #""say \"hi\" \\ bye""#)
     }
 }
+
+@Suite struct SessionValidationTests {
+    func session(_ location: TerminalLocation?) -> AgentSession {
+        AgentSession(id: SessionKey(pid: 42, startTime: 100), agent: .codex, tty: "ttys000", cwd: nil,
+                     agentSessionID: nil, name: "test", logURL: nil, logState: .unknown,
+                     resumability: location.map(Resumability.ready) ?? .unsupported(hostName: "iTerm2"))
+    }
+
+    @Test func failedQueryKeepsDisplayTargetButDoesNotValidateIt() {
+        let target = TerminalLocation(kind: .iTerm, identifier: "/dev/ttys000")
+        var snapshot = TerminalSnapshot()
+        snapshot.recordFailure(CommandResult(status: -2, output: "", error: "timeout"), for: .iTerm)
+        let located = TerminalLocator.locate(tty: "ttys000", cwd: nil, snapshot: snapshot,
+                                            previous: target, hostAppName: nil)
+        #expect(located.location == target)
+        guard case .failed(let reason, let retryable) = SessionDiscovery.validateTarget(session(located.location), previous: target, snapshot: snapshot) else {
+            Issue.record("A cached target must not authorize input after a query failure")
+            return
+        }
+        #expect(reason == "iTerm2: query timed out")
+        #expect(retryable)
+    }
+
+    @Test func missingTabNeverAuthorizesInputButCanBeCheckedAgain() {
+        let target = TerminalLocation(kind: .iTerm, identifier: "/dev/ttys000")
+        guard case .failed(let reason, let retryable) = SessionDiscovery.validateTarget(session(nil), previous: target, snapshot: TerminalSnapshot()) else {
+            Issue.record("Missing tab should fail validation")
+            return
+        }
+        #expect(reason == "iTerm2 tab or pane was not found")
+        #expect(retryable)
+    }
+
+    @Test func changedTargetRefusesInputAndTitleChangeIsAllowed() {
+        let target = TerminalLocation(kind: .iTerm, identifier: "/dev/ttys000", title: "old")
+        var changed = target
+        changed.title = "new"
+        guard case .valid = SessionDiscovery.validateTarget(session(changed), previous: target, snapshot: TerminalSnapshot()) else {
+            Issue.record("Animated titles must not invalidate the tab")
+            return
+        }
+        changed.identifier = "/dev/ttys001"
+        guard case .failed(_, false) = SessionDiscovery.validateTarget(session(changed), previous: target, snapshot: TerminalSnapshot()) else {
+            Issue.record("Changed target must be rejected")
+            return
+        }
+    }
+
+    @Test func tmuxWithoutServerIsAnEmptySnapshot() {
+        var snapshot = TerminalSnapshot()
+        snapshot.recordFailure(CommandResult(status: 1, output: "", error: "no server running on /tmp/tmux/default"), for: .tmux)
+        #expect(snapshot.failures.isEmpty)
+    }
+
+    @Test func permissionDenialIsNotRetried() {
+        var snapshot = TerminalSnapshot()
+        snapshot.recordFailure(CommandResult(status: 1, output: "", error: "Not authorized (-1743)"), for: .iTerm)
+        #expect(snapshot.failures[.iTerm]?.retryable == false)
+    }
+}

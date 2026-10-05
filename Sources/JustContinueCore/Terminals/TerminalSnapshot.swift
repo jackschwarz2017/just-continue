@@ -16,6 +16,27 @@ public struct TerminalSnapshot: Sendable {
     public var ghosttyTerminals: [Tab] = []
     public var ghosttyVersion: String?
 
+    struct QueryFailure: Sendable {
+        var reason: String
+        var retryable: Bool
+    }
+    var failures: [TerminalKind: QueryFailure] = [:]
+
+    mutating func recordFailure(_ result: CommandResult, for kind: TerminalKind) {
+        guard !result.ok else { return }
+        // An installed tmux with no running server is an ordinary empty snapshot.
+        if kind == .tmux, result.status == 1,
+           result.error.contains("no server running") || result.error.contains("No such file or directory") { return }
+        let denied = result.error.contains("-1743")
+        let code = result.error.range(of: #"\(-[0-9]+\)"#, options: .regularExpression)
+            .map { String(result.error[$0]) }
+        let detail: String
+        if denied { detail = "automation access denied" }
+        else if result.status == -2 { detail = "query timed out" }
+        else { detail = "query failed \(code ?? "(status \(result.status))")" }
+        failures[kind] = QueryFailure(reason: "\(kind.displayName): \(detail)", retryable: !denied)
+    }
+
     public init() {}
 
     static let separator = "\u{1F}"  // unit separator, won't appear in titles
@@ -25,6 +46,7 @@ public struct TerminalSnapshot: Sendable {
 
         if let tmux = Tmux.path {
             let r = Shell.run(tmux, ["list-panes", "-a", "-F", "#{pane_tty}\(separator)#{pane_id}\(separator)#{session_name}:#{window_index}.#{pane_index} #{pane_title}"])
+            snap.recordFailure(r, for: .tmux)
             if r.ok {
                 for line in r.output.split(separator: "\n") {
                     let f = line.components(separatedBy: separator)
@@ -49,6 +71,7 @@ public struct TerminalSnapshot: Sendable {
             end tell
             return out
             """)
+            snap.recordFailure(r, for: .iTerm)
             for (tty, title) in pairs(r) { snap.iTermSessions[ttyName(tty)] = Tab(identifier: tty, title: title, workingDirectory: nil) }
         }
 
@@ -65,6 +88,7 @@ public struct TerminalSnapshot: Sendable {
             end tell
             return out
             """)
+            snap.recordFailure(r, for: .terminalApp)
             for (tty, title) in pairs(r) { snap.terminalTabs[ttyName(tty)] = Tab(identifier: tty, title: title, workingDirectory: nil) }
         }
 
@@ -83,6 +107,7 @@ public struct TerminalSnapshot: Sendable {
             end tell
             return out
             """)
+            snap.recordFailure(r, for: .ghostty)
             if r.ok {
                 var lines = r.output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
                 if !lines.isEmpty { snap.ghosttyVersion = lines.removeFirst() }

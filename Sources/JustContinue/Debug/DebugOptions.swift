@@ -133,9 +133,13 @@ struct DebugDiscovery: SessionDiscovering {
 
     func invalidateTerminalCache() { real.invalidateTerminalCache() }
 
-    func revalidate(_ session: AgentSession) -> AgentSession? {
-        guard !denied.value else { return nil }
-        return session.id.pid < 0 ? simulated.value.first { $0.id == session.id } : (hideReal.value ? nil : real.revalidate(session))
+    func revalidate(_ session: AgentSession) -> SessionValidation {
+        guard !denied.value else { return .failed(reason: "Terminal access denial is being simulated", retryable: false) }
+        if session.id.pid < 0 {
+            return simulated.value.first { $0.id == session.id }.map(SessionValidation.valid)
+                ?? .failed(reason: "Simulated session closed", retryable: false)
+        }
+        return hideReal.value ? .failed(reason: "Real sessions hidden", retryable: false) : real.revalidate(session)
     }
 }
 
@@ -196,5 +200,5 @@ struct ClaudeHandoffDiscovery: SessionDiscovering {
     }
 
     func invalidateTerminalCache() { inner.invalidateTerminalCache() }
-    func revalidate(_ session: AgentSession) -> AgentSession? { inner.revalidate(session) }
+    func revalidate(_ session: AgentSession) -> SessionValidation { inner.revalidate(session) }
 }

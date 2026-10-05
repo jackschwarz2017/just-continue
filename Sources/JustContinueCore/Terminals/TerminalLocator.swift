@@ -10,6 +10,9 @@ public enum TerminalLocator {
     ///   - hostAppName: name of the GUI app found in the process ancestry, for messages.
     public static func locate(tty: String, cwd: String?, snapshot: TerminalSnapshot,
                               previous: TerminalLocation?, hostAppName: String?) -> Resumability {
+        if let previous, snapshot.failures[previous.kind] != nil {
+            return .ready(previous) // revalidation must still obtain a successful fresh query
+        }
         // tmux first: an agent inside tmux is on the pane's tty, not the outer tab's.
         if let pane = snapshot.tmuxPanes[tty] {
             return .ready(TerminalLocation(kind: .tmux, identifier: pane.identifier, title: pane.title))

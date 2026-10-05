@@ -18,9 +18,12 @@ final class FakeDiscovery: SessionDiscovering, @unchecked Sendable {
     let sessions = Box<[AgentSession]>([])
     func scan(previous: [SessionKey: TerminalLocation]) -> [AgentSession] { sessions.value }
     let beforeRevalidate = Box<(@Sendable () -> Void)?>(nil)
-    func revalidate(_ session: AgentSession) -> AgentSession? {
+    let validationFailure = Box<SessionValidation?>(nil)
+    func revalidate(_ session: AgentSession) -> SessionValidation {
         beforeRevalidate.value?()
-        return sessions.value.first { $0.id == session.id }
+        if let failure = validationFailure.value { return failure }
+        return sessions.value.first { $0.id == session.id }.map(SessionValidation.valid)
+            ?? .failed(reason: "Agent process is no longer available", retryable: false)
     }
 }
 

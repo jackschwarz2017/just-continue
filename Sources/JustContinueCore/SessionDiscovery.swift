@@ -4,12 +4,18 @@ import Foundation
 public protocol SessionDiscovering: Sendable {
     func scan(previous: [SessionKey: TerminalLocation]) -> [AgentSession]
     /// Fresh, single-session check right before typing.
-    func revalidate(_ session: AgentSession) -> AgentSession?
+    func revalidate(_ session: AgentSession) -> SessionValidation
     func invalidateTerminalCache()
 }
 
 extension SessionDiscovering {
     public func invalidateTerminalCache() {}
+}
+
+public enum SessionValidation: Sendable {
+    case valid(AgentSession)
+    /// Only read failures can be retried; input has not been sent yet.
+    case failed(reason: String, retryable: Bool)
 }
 
 public struct SessionDiscovery: SessionDiscovering {
@@ -94,24 +100,48 @@ public struct SessionDiscovery: SessionDiscovering {
 
     public func invalidateTerminalCache() { snapshots.invalidate() }
 
-    public func revalidate(_ session: AgentSession) -> AgentSession? {
-        guard let entry = ProcessTable.entry(pid: session.id.pid), abs(entry.startTime - session.id.startTime) < 1,
-              entry.tty == session.tty else { return nil }
+    public func revalidate(_ session: AgentSession) -> SessionValidation {
+        guard let entry = ProcessTable.entry(pid: session.id.pid) else {
+            return .failed(reason: "Agent process is no longer available", retryable: false)
+        }
+        guard abs(entry.startTime - session.id.startTime) < 1 else {
+            return .failed(reason: "Agent process was replaced", retryable: false)
+        }
+        guard entry.tty == session.tty else {
+            return .failed(reason: "Agent terminal changed", retryable: false)
+        }
         var fresh = session
         if let url = session.logURL {
             fresh.logState = session.agent == .claude ? claude.state(of: url) : codex.state(of: url)
         }
         // A Claude session id can change inside one process (e.g. /clear); the old log is then stale.
         if session.agent == .claude, let meta = claude.meta(pid: entry.pid), meta.sessionID != session.agentSessionID {
-            return nil
+            return .failed(reason: "Claude session changed", retryable: false)
         }
         let snapshot = TerminalSnapshot.capture()
         let parents = Dictionary(ProcessTable.all().map { ($0.pid, $0.ppid) }, uniquingKeysWith: { a, _ in a })
         let host = session.resumability.location?.kind == .ghostty ? "Ghostty" : TerminalLocator.hostAppName(pid: entry.pid, parents: parents)
         fresh.resumability = TerminalLocator.locate(tty: session.tty, cwd: session.cwd, snapshot: snapshot,
                                                     previous: session.resumability.location, hostAppName: host)
-        guard let old = session.resumability.location, let new = fresh.resumability.location, new.isSameTarget(as: old) else { return nil }
-        return fresh
+        return Self.validateTarget(fresh, previous: session.resumability.location, snapshot: snapshot)
+    }
+
+    static func validateTarget(_ fresh: AgentSession, previous: TerminalLocation?, snapshot: TerminalSnapshot) -> SessionValidation {
+        guard let previous else {
+            return .failed(reason: "No terminal target was recorded", retryable: false)
+        }
+        if let failure = snapshot.failures[previous.kind] {
+            return .failed(reason: failure.reason, retryable: failure.retryable)
+        }
+        guard let target = fresh.resumability.location else {
+            // A terminal can temporarily omit a live process's tab during enumeration.
+            // Retry the read, but never send until that same target is found again.
+            return .failed(reason: "\(previous.kind.displayName) tab or pane was not found", retryable: true)
+        }
+        guard target.isSameTarget(as: previous) else {
+            return .failed(reason: "Terminal target changed", retryable: false)
+        }
+        return .valid(fresh)
     }
 }
 
@@ -129,7 +159,7 @@ final class SnapshotCache: @unchecked Sendable {
             return c.snapshot
         }
         let fresh = capture()
-        lock.withLock { cached = (keys, now, fresh) }
+        lock.withLock { cached = fresh.failures.isEmpty ? (keys, now, fresh) : nil }
         return fresh
     }
 }

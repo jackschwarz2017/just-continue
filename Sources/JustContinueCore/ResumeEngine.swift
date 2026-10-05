@@ -62,6 +62,8 @@ public struct PendingResume: Equatable, Sendable {
     public var fireAt: Date
     var quotaRestoredAt: Date?
     public var attempts = 0
+    var validationFailures = 0
+    var validationRetryAt: Date?
     public var phase = Phase.waiting
     /// Distinguishes a pending send from one cancelled and scheduled again.
     var sendID = UUID()
@@ -336,7 +338,9 @@ public final class ResumeEngine {
                     }
                     rows[i].pending = pending
                 }
-                if t >= pending.fireAt { attemptResume(at: i, userInitiated: false) }
+                if t >= pending.fireAt, pending.validationRetryAt.map({ t >= $0 }) ?? true {
+                    attemptResume(at: i, userInitiated: false)
+                }
 
             case .verifying(let sentAt):
                 guard let limit else {
@@ -419,13 +423,30 @@ public final class ResumeEngine {
 
         Task {
             // Terminal revalidation can take seconds. Recheck permission to send after it finishes.
-            let fresh = await Task.detached { discovery.revalidate(session) }.value
+            let validation = await Task.detached { discovery.revalidate(session) }.value
             guard let current = self.index(key),
                   self.rows[current].pending?.sendID == sendID,
                   self.rows[current].pending?.phase == .sending else { return }
+            let fresh: AgentSession
+            switch validation {
+            case .valid(let session): fresh = session
+            case .failed(let reason, let retryable):
+                if retryable, self.rows[current].enabled,
+                   (self.rows[current].pending?.validationFailures ?? 0) < 3 {
+                    self.rows[current].pending?.validationFailures += 1
+                    self.rows[current].pending?.validationRetryAt = self.now().addingTimeInterval(30)
+                    self.rows[current].pending?.phase = .waiting
+                    self.log("Couldn't check \(session.name): \(reason); retrying in 30s", about: session)
+                } else {
+                    self.fail(at: current, reason: reason)
+                }
+                return
+            }
+            self.rows[current].pending?.validationRetryAt = nil
+            self.rows[current].pending?.validationFailures = 0
             if !userInitiated {
                 guard self.rows[current].enabled else { return }
-                if let fresh, let freshLimit = fresh.logState.limit, freshLimit != self.rows[current].pending?.limit {
+                if let freshLimit = fresh.logState.limit, freshLimit != self.rows[current].pending?.limit {
                     // A new limit arrived while revalidating; never send against the previous one.
                     self.rows[current].session = fresh
                     self.rows[current].pending = nil
@@ -433,7 +454,7 @@ public final class ResumeEngine {
                     return
                 }
                 if self.rows[current].pending?.quotaRestoredAt != nil,
-                   let fresh, fresh.logState.limit != nil, !self.quotaAvailable(for: fresh, at: self.now()) {
+                   fresh.logState.limit != nil, !self.quotaAvailable(for: fresh, at: self.now()) {
                     self.rows[current].pending?.phase = .waiting
                     self.evaluate()
                     return
@@ -446,7 +467,6 @@ public final class ResumeEngine {
                 }
             }
             let result: SendResult = await Task.detached {
-                guard let fresh else { return .failed("Session changed or closed") }
                 guard fresh.logState.limit != nil else { return .alreadyContinued }
                 guard let target = fresh.resumability.location else { return .failed("Terminal tab not found") }
                 if dryRun { return .sent(fresh) }
