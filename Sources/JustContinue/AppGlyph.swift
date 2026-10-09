@@ -17,7 +17,7 @@ enum AppGlyph {
     }
 
     /// The menu-bar icon. With `badge`, a small dot at the bottom right, just outside the arc,
-    /// shows that at least one session is set to continue. Both variants have the same size, so the
+    /// shows that at least one session is set to continue or the Mac is kept awake. Both variants have the same size, so the
     /// icon doesn't shift in the menu bar when the dot appears.
     static func menuBarImage(badge: Bool) -> NSImage? {
         guard let glyph = image(size: 15) else { return nil }
@@ -30,7 +30,7 @@ enum AppGlyph {
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = badge ? "Just Continue, auto-continue on" : "Just Continue"
+        image.accessibilityDescription = badge ? "Just Continue, on" : "Just Continue"
         return image
     }
 

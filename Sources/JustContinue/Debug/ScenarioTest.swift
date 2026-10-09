@@ -167,6 +167,8 @@ enum ScenarioTest {
             if let awake = menu.rowView("Keep Mac Awake") {
                 _ = awake.accessibilityPerformPress()
                 check("15 Keep Mac Awake toggles in place", engine.isKeepingAwake && awake.content.checked)
+                try? await Task.sleep(for: .milliseconds(100))
+                check("15 icon shows the dot while Keep Mac Awake is on", menu.iconHasBadge)
             }
             if let screen = menu.rowView("Keep Screen On") {
                 let before = model.keepDisplayOn
@@ -176,6 +178,13 @@ enum ScenarioTest {
             }
             model.keepAwakeManually = false
             check("15 off again", !engine.isKeepingAwake || engine.rows.contains(where: \.enabled))
+            // Keep Screen On on its own also shows the dot.
+            model.keepDisplayOn = true
+            try? await Task.sleep(for: .milliseconds(100))
+            check("15 icon shows the dot while Keep Screen On is on", menu.iconHasBadge)
+            model.keepDisplayOn = false
+            try? await Task.sleep(for: .milliseconds(100))
+            check("15 dot goes away when both are off", !menu.iconHasBadge || engine.rows.contains(where: \.enabled))
 
             await reset()
             model.recordTerminalAccess(.denied, for: TerminalBundle.terminal)

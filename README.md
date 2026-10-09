@@ -52,7 +52,7 @@ Keep a laptop's lid open unless it's set up to stay awake with an external displ
 
 Click a session in the menu to enable or disable automatic continuation. Hold **⌥** for
 **Continue Now**, **Show in Terminal**, and **Reveal in Finder**. **⌃⌥R** opens the menu;
-a dot on the menu-bar icon means at least one session is enabled.
+a dot on the menu-bar icon means at least one session is enabled or the Mac is kept awake.
 
 The Mac stays awake while any session is enabled. **Keep Mac Awake** and **Keep Screen On** in
 the menu also work on their own, with no sessions running. Keep Screen On keeps the Mac awake

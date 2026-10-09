@@ -49,13 +49,14 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private func observeIcon() {
         withObservationTracking {
-            updateIcon(armed: model.engine.rows.contains(where: \.enabled))
+            // isKeepingAwake also covers Keep Mac Awake and Keep Screen On, so their checkmarks and the dot agree.
+            updateIcon(armed: model.engine.rows.contains(where: \.enabled) || model.engine.isKeepingAwake)
         } onChange: { [weak self] in
             Task { @MainActor in self?.observeIcon() }
         }
     }
 
-    /// The app's Lucide glyph, with a dot while any session is set to continue.
+    /// The app's Lucide glyph, with a dot while any session is set to continue or the Mac is kept awake.
     private func updateIcon(armed: Bool) {
         statusItem.button?.image = AppGlyph.menuBarImage(badge: armed)
         iconHasBadge = armed
