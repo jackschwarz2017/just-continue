@@ -99,6 +99,9 @@ public final class ResumeEngine {
     public private(set) var rows: [SessionRow] = []
     public private(set) var activity: [ActivityEntry] = []
     public private(set) var isKeepingAwake = false
+    /// The menu-bar dot: a session is set to continue, or the Mac is kept awake (which includes
+    /// Keep Mac Awake and Keep Screen On, so the dot matches their checkmarks).
+    public var showsMenuBarDot: Bool { rows.contains(where: \.enabled) || isKeepingAwake }
     public private(set) var lastScan: Date?
     public var settings: EngineSettings
 

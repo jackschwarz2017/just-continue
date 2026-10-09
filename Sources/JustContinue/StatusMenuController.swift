@@ -49,8 +49,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private func observeIcon() {
         withObservationTracking {
-            // isKeepingAwake also covers Keep Mac Awake and Keep Screen On, so their checkmarks and the dot agree.
-            updateIcon(armed: model.engine.rows.contains(where: \.enabled) || model.engine.isKeepingAwake)
+            updateIcon(armed: model.engine.showsMenuBarDot)
         } onChange: { [weak self] in
             Task { @MainActor in self?.observeIcon() }
         }

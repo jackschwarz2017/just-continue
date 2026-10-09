@@ -386,6 +386,30 @@ final class Harness {
         #expect(h.sleep.display == false)
     }
 
+    @Test func menuBarDotFollowsKeepAwakeAndKeepScreenOn() async {
+        let h = Harness()
+        await h.show()
+        #expect(h.engine.showsMenuBarDot == false, "nothing on")
+
+        // The menu-bar icon redraws through observation, so turning either option on must notify it.
+        for turnOn in [{ h.engine.settings.keepAwakeManually = true }, { h.engine.settings.keepDisplayOn = true }] {
+            let changed = Box(false)
+            withObservationTracking { _ = h.engine.showsMenuBarDot } onChange: { changed.value = true }
+            turnOn()
+            h.engine.updateSleep()
+            #expect(changed.value, "the icon is told to redraw")
+            #expect(h.engine.showsMenuBarDot)
+            h.engine.settings.keepAwakeManually = false
+            h.engine.settings.keepDisplayOn = false
+            h.engine.updateSleep()
+            #expect(h.engine.showsMenuBarDot == false, "dot goes away when turned off")
+        }
+
+        await h.show(h.session(.running))
+        h.engine.setEnabled(Harness.key, true)
+        #expect(h.engine.showsMenuBarDot, "an enabled session still shows the dot")
+    }
+
     @Test func doesNotTypeIfSessionChangedBeforeSending() async {
         let h = Harness()
         await h.show(h.session(h.limited(resetAt: h.clock.value.addingTimeInterval(-120))))
